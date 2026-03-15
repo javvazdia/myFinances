@@ -23,13 +23,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.myfinances.app.data.FakeFinanceRepository
 import com.myfinances.app.domain.model.RecentTransaction
+import com.myfinances.app.domain.repository.FinanceRepository
 
 @Composable
 fun OverviewRoute(
+    financeRepository: FinanceRepository,
     overviewViewModel: OverviewViewModel = viewModel {
-        OverviewViewModel(FakeFinanceRepository())
+        OverviewViewModel(financeRepository)
     },
 ) {
     val uiState by overviewViewModel.uiState.collectAsState()

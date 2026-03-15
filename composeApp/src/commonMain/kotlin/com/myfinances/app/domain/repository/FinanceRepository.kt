@@ -1,8 +1,8 @@
 package com.myfinances.app.domain.repository
 
 import com.myfinances.app.domain.model.OverviewSnapshot
+import kotlinx.coroutines.flow.Flow
 
 interface FinanceRepository {
-    fun loadOverview(): OverviewSnapshot
+    fun observeOverview(): Flow<OverviewSnapshot>
 }
-

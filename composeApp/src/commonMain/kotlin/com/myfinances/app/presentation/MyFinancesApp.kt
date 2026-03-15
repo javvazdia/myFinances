@@ -15,14 +15,16 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.myfinances.app.di.AppDependencies
 import com.myfinances.app.navigation.AppDestination
 import com.myfinances.app.platform.Platform
+import com.myfinances.app.presentation.accounts.AccountsRoute
 import com.myfinances.app.presentation.overview.OverviewRoute
 import com.myfinances.app.presentation.shared.PlaceholderScreen
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MyFinancesApp() {
+fun MyFinancesApp(appDependencies: AppDependencies) {
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
@@ -65,12 +67,11 @@ fun MyFinancesApp() {
             modifier = Modifier.padding(innerPadding),
         ) {
             composable(AppDestination.Overview.route) {
-                OverviewRoute()
+                OverviewRoute(financeRepository = appDependencies.financeRepository)
             }
             composable(AppDestination.Accounts.route) {
-                PlaceholderScreen(
-                    title = "Accounts",
-                    description = "This is where checking, savings, cash, and credit accounts will live.",
+                AccountsRoute(
+                    ledgerRepository = appDependencies.ledgerRepository,
                 )
             }
             composable(AppDestination.Transactions.route) {
