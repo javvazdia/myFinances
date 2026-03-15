@@ -68,6 +68,7 @@ kotlin {
         val desktopMain by getting {
             dependencies {
                 implementation(compose.desktop.currentOs)
+                implementation(libs.kotlinx.coroutines.swing)
             }
         }
     }
@@ -110,6 +111,7 @@ android {
 compose.desktop {
     application {
         mainClass = "com.myfinances.app.MainKt"
+        jvmArgs += listOf("--enable-native-access=ALL-UNNAMED")
 
         nativeDistributions {
             packageName = "myFinances"
