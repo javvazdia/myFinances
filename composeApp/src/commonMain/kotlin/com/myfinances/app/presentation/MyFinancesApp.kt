@@ -20,6 +20,7 @@ import com.myfinances.app.navigation.AppDestination
 import com.myfinances.app.platform.Platform
 import com.myfinances.app.presentation.accounts.AccountsRoute
 import com.myfinances.app.presentation.overview.OverviewRoute
+import com.myfinances.app.presentation.transactions.TransactionsRoute
 import com.myfinances.app.presentation.shared.PlaceholderScreen
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -75,9 +76,8 @@ fun MyFinancesApp(appDependencies: AppDependencies) {
                 )
             }
             composable(AppDestination.Transactions.route) {
-                PlaceholderScreen(
-                    title = "Transactions",
-                    description = "Next step: import, create, edit, and reconcile transactions from a single source of truth.",
+                TransactionsRoute(
+                    ledgerRepository = appDependencies.ledgerRepository,
                 )
             }
             composable(AppDestination.Budgets.route) {
