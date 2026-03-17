@@ -21,4 +21,31 @@ class TransactionsScreenTest {
         val transactionId = generateTransactionId(TransactionType.EXPENSE, 1234L)
         assertEquals(true, transactionId.startsWith("txn-expense-1234-"))
     }
+
+    @Test
+    fun formatsTransactionAmountForEditingInput() {
+        assertEquals("18.75", formatTransactionAmountInput(18_75L))
+        assertEquals("120.00", formatTransactionAmountInput(120_00L))
+        assertEquals("9.05", formatTransactionAmountInput(9_05L))
+    }
+
+    @Test
+    fun exposesDeleteConfirmationTitleFromSelectedTransaction() {
+        val uiState = TransactionsUiState(
+            recentTransactions = listOf(
+                TransactionCardUiModel(
+                    id = "txn-1",
+                    title = "Groceries",
+                    accountName = "Checking",
+                    categoryName = "Food",
+                    amountLabel = "-18.75 EUR",
+                    dateLabel = "Today",
+                    isExpense = true,
+                ),
+            ),
+            deleteConfirmationTransactionId = "txn-1",
+        )
+
+        assertEquals("Groceries", uiState.deleteConfirmationTransactionTitle)
+    }
 }

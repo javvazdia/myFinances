@@ -12,9 +12,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -22,13 +25,17 @@ import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -68,7 +75,12 @@ fun TransactionsRoute(
         onAmountChange = transactionsViewModel::onAmountChange,
         onMerchantChange = transactionsViewModel::onMerchantChange,
         onNoteChange = transactionsViewModel::onNoteChange,
-        onCreateTransaction = transactionsViewModel::createTransaction,
+        onSaveTransaction = transactionsViewModel::saveTransaction,
+        onEditTransaction = transactionsViewModel::editTransaction,
+        onRequestDeleteTransaction = transactionsViewModel::requestDeleteTransaction,
+        onConfirmDeleteTransaction = transactionsViewModel::confirmDeleteTransaction,
+        onDismissDeleteDialog = transactionsViewModel::dismissDeleteDialog,
+        onCancelEditing = transactionsViewModel::cancelEditing,
     )
 }
 
@@ -81,10 +93,24 @@ fun TransactionsScreen(
     onAmountChange: (String) -> Unit,
     onMerchantChange: (String) -> Unit,
     onNoteChange: (String) -> Unit,
-    onCreateTransaction: () -> Unit,
+    onSaveTransaction: () -> Unit,
+    onEditTransaction: (String) -> Unit,
+    onRequestDeleteTransaction: (String) -> Unit,
+    onConfirmDeleteTransaction: () -> Unit,
+    onDismissDeleteDialog: () -> Unit,
+    onCancelEditing: () -> Unit,
 ) {
+    val listState = rememberLazyListState()
+
+    LaunchedEffect(uiState.editingTransactionId) {
+        if (uiState.editingTransactionId != null) {
+            listState.animateScrollToItem(index = 2)
+        }
+    }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
+        state = listState,
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
@@ -105,7 +131,7 @@ fun TransactionsScreen(
         }
 
         item {
-            CreateTransactionCard(
+            TransactionFormCard(
                 uiState = uiState,
                 onTypeSelected = onTypeSelected,
                 onAccountSelected = onAccountSelected,
@@ -113,7 +139,8 @@ fun TransactionsScreen(
                 onAmountChange = onAmountChange,
                 onMerchantChange = onMerchantChange,
                 onNoteChange = onNoteChange,
-                onCreateTransaction = onCreateTransaction,
+                onSaveTransaction = onSaveTransaction,
+                onCancelEditing = onCancelEditing,
             )
         }
 
@@ -139,15 +166,52 @@ fun TransactionsScreen(
             }
         } else {
             items(uiState.recentTransactions) { transaction ->
-                TransactionCard(transaction = transaction)
+                TransactionCard(
+                    transaction = transaction,
+                    onEditTransaction = onEditTransaction,
+                    onRequestDeleteTransaction = onRequestDeleteTransaction,
+                    canInteract = !uiState.isBusy,
+                    isEditing = uiState.editingTransactionId == transaction.id,
+                    isDeleting = uiState.pendingDeleteTransactionId == transaction.id,
+                )
             }
         }
+    }
+
+    if (uiState.deleteConfirmationTransactionId != null) {
+        AlertDialog(
+            onDismissRequest = onDismissDeleteDialog,
+            title = {
+                Text("Delete transaction?")
+            },
+            text = {
+                Text(
+                    "Delete ${uiState.deleteConfirmationTransactionTitle ?: "this transaction"}? This action cannot be undone.",
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = onConfirmDeleteTransaction,
+                    enabled = !uiState.isBusy,
+                ) {
+                    Text(if (uiState.pendingDeleteTransactionId != null) "Deleting..." else "Delete")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = onDismissDeleteDialog,
+                    enabled = !uiState.isBusy,
+                ) {
+                    Text("Cancel")
+                }
+            },
+        )
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun CreateTransactionCard(
+private fun TransactionFormCard(
     uiState: TransactionsUiState,
     onTypeSelected: (TransactionType) -> Unit,
     onAccountSelected: (String) -> Unit,
@@ -155,11 +219,19 @@ private fun CreateTransactionCard(
     onAmountChange: (String) -> Unit,
     onMerchantChange: (String) -> Unit,
     onNoteChange: (String) -> Unit,
-    onCreateTransaction: () -> Unit,
+    onSaveTransaction: () -> Unit,
+    onCancelEditing: () -> Unit,
 ) {
     var typeMenuExpanded by remember { mutableStateOf(false) }
     var accountMenuExpanded by remember { mutableStateOf(false) }
     var categoryMenuExpanded by remember { mutableStateOf(false) }
+    val amountFocusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(uiState.editingTransactionId) {
+        if (uiState.editingTransactionId != null) {
+            amountFocusRequester.requestFocus()
+        }
+    }
 
     Card {
         Column(
@@ -169,9 +241,19 @@ private fun CreateTransactionCard(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
-                text = "Create transaction",
+                text = if (uiState.isEditing) "Edit transaction" else "Create transaction",
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.SemiBold,
+            )
+
+            Text(
+                text = if (uiState.isEditing) {
+                    "You are updating a manual transaction. This keeps the same local record stable for future sync and reconciliation work."
+                } else {
+                    "Create a manual transaction now. Later, synced transactions from external providers can flow through this same ledger."
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
             ExposedDropdownMenuBox(
@@ -185,7 +267,7 @@ private fun CreateTransactionCard(
                         .fillMaxWidth()
                         .menuAnchor(),
                     readOnly = true,
-                    enabled = !uiState.isSaving,
+                    enabled = !uiState.isBusy,
                     label = { Text("Transaction type") },
                     trailingIcon = {
                         ExposedDropdownMenuDefaults.TrailingIcon(expanded = typeMenuExpanded)
@@ -218,7 +300,7 @@ private fun CreateTransactionCard(
                         .fillMaxWidth()
                         .menuAnchor(),
                     readOnly = true,
-                    enabled = !uiState.isSaving && uiState.accounts.isNotEmpty(),
+                    enabled = !uiState.isBusy && uiState.accounts.isNotEmpty(),
                     label = { Text("Account") },
                     trailingIcon = {
                         ExposedDropdownMenuDefaults.TrailingIcon(expanded = accountMenuExpanded)
@@ -251,7 +333,7 @@ private fun CreateTransactionCard(
                         .fillMaxWidth()
                         .menuAnchor(),
                     readOnly = true,
-                    enabled = !uiState.isSaving && uiState.availableCategories.isNotEmpty(),
+                    enabled = !uiState.isBusy && uiState.availableCategories.isNotEmpty(),
                     label = { Text("Category") },
                     trailingIcon = {
                         ExposedDropdownMenuDefaults.TrailingIcon(expanded = categoryMenuExpanded)
@@ -276,12 +358,14 @@ private fun CreateTransactionCard(
             OutlinedTextField(
                 value = uiState.draftAmount,
                 onValueChange = onAmountChange,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .focusRequester(amountFocusRequester),
                 label = { Text("Amount") },
                 supportingText = { Text("Examples: 18.75 or 1200.00") },
                 keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
                 singleLine = true,
-                enabled = !uiState.isSaving,
+                enabled = !uiState.isBusy,
             )
 
             OutlinedTextField(
@@ -290,7 +374,7 @@ private fun CreateTransactionCard(
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text("Merchant or source") },
                 singleLine = true,
-                enabled = !uiState.isSaving,
+                enabled = !uiState.isBusy,
             )
 
             OutlinedTextField(
@@ -299,7 +383,7 @@ private fun CreateTransactionCard(
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text("Note") },
                 minLines = 2,
-                enabled = !uiState.isSaving,
+                enabled = !uiState.isBusy,
             )
 
             if (uiState.errorMessage != null) {
@@ -310,19 +394,51 @@ private fun CreateTransactionCard(
                 )
             }
 
-            Button(
-                onClick = onCreateTransaction,
-                enabled = !uiState.isSaving && uiState.accounts.isNotEmpty(),
-            ) {
-                Text(if (uiState.isSaving) "Saving..." else "Create transaction")
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Button(
+                    onClick = onSaveTransaction,
+                    enabled = !uiState.isBusy && uiState.accounts.isNotEmpty(),
+                ) {
+                    Text(
+                        when {
+                            uiState.isSaving -> "Saving..."
+                            uiState.isEditing -> "Save changes"
+                            else -> "Create transaction"
+                        },
+                    )
+                }
+
+                if (uiState.isEditing) {
+                    TextButton(
+                        onClick = onCancelEditing,
+                        enabled = !uiState.isBusy,
+                    ) {
+                        Text("Cancel")
+                    }
+                }
             }
         }
     }
 }
 
 @Composable
-private fun TransactionCard(transaction: TransactionCardUiModel) {
-    Card {
+private fun TransactionCard(
+    transaction: TransactionCardUiModel,
+    onEditTransaction: (String) -> Unit,
+    onRequestDeleteTransaction: (String) -> Unit,
+    canInteract: Boolean,
+    isEditing: Boolean,
+    isDeleting: Boolean,
+) {
+    Card(
+        colors = if (isEditing) {
+            CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+            )
+        } else {
+            CardDefaults.cardColors()
+        },
+    ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -335,7 +451,7 @@ private fun TransactionCard(transaction: TransactionCardUiModel) {
                         fontWeight = FontWeight.SemiBold,
                     )
                     Text(
-                        text = "${transaction.accountName} · ${transaction.categoryName}",
+                        text = "${transaction.accountName} - ${transaction.categoryName}",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -362,6 +478,26 @@ private fun TransactionCard(transaction: TransactionCardUiModel) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(
+                    onClick = { onEditTransaction(transaction.id) },
+                    enabled = canInteract,
+                ) {
+                    Text(if (isEditing) "Editing" else "Edit")
+                }
+                TextButton(
+                    onClick = { onRequestDeleteTransaction(transaction.id) },
+                    enabled = canInteract,
+                ) {
+                    Text(
+                        text = if (isDeleting) "Deleting..." else "Delete",
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
         }
     }
 }
@@ -369,6 +505,7 @@ private fun TransactionCard(transaction: TransactionCardUiModel) {
 data class TransactionsUiState(
     val accounts: List<Account> = emptyList(),
     val categories: List<Category> = emptyList(),
+    val transactions: List<FinanceTransaction> = emptyList(),
     val recentTransactions: List<TransactionCardUiModel> = emptyList(),
     val selectedType: TransactionType = TransactionType.EXPENSE,
     val selectedAccountId: String? = null,
@@ -376,7 +513,10 @@ data class TransactionsUiState(
     val draftAmount: String = "",
     val draftMerchant: String = "",
     val draftNote: String = "",
+    val editingTransactionId: String? = null,
+    val deleteConfirmationTransactionId: String? = null,
     val isSaving: Boolean = false,
+    val pendingDeleteTransactionId: String? = null,
     val errorMessage: String? = null,
 ) {
     val availableCategories: List<Category>
@@ -387,6 +527,17 @@ data class TransactionsUiState(
 
     val selectedCategoryName: String?
         get() = categories.firstOrNull { category -> category.id == selectedCategoryId }?.name
+
+    val isEditing: Boolean
+        get() = editingTransactionId != null
+
+    val deleteConfirmationTransactionTitle: String?
+        get() = recentTransactions.firstOrNull { transaction ->
+            transaction.id == deleteConfirmationTransactionId
+        }?.title
+
+    val isBusy: Boolean
+        get() = isSaving || pendingDeleteTransactionId != null
 }
 
 data class TransactionCardUiModel(
@@ -415,6 +566,11 @@ class TransactionsViewModel(
                 Triple(accounts, categories, transactions)
             }.collect { (accounts, categories, transactions) ->
                 _uiState.update { currentState ->
+                    val nextEditingTransactionId = currentState.editingTransactionId
+                        ?.takeIf { editingId ->
+                            transactions.any { transaction -> transaction.id == editingId }
+                        }
+
                     val nextSelectedAccountId = currentState.selectedAccountId
                         ?.takeIf { selectedId -> accounts.any { account -> account.id == selectedId } }
                         ?: accounts.firstOrNull()?.id
@@ -431,11 +587,36 @@ class TransactionsViewModel(
                     currentState.copy(
                         accounts = accounts,
                         categories = categories,
+                        transactions = transactions,
                         recentTransactions = transactions.map { transaction ->
                             transaction.toCardUiModel(accounts, categories)
                         },
                         selectedAccountId = nextSelectedAccountId,
                         selectedCategoryId = nextSelectedCategoryId,
+                        editingTransactionId = nextEditingTransactionId,
+                        deleteConfirmationTransactionId = currentState.deleteConfirmationTransactionId
+                            ?.takeIf { confirmationId ->
+                                transactions.any { transaction -> transaction.id == confirmationId }
+                            },
+                        pendingDeleteTransactionId = currentState.pendingDeleteTransactionId
+                            ?.takeIf { deletingId ->
+                                transactions.any { transaction -> transaction.id == deletingId }
+                            },
+                        draftAmount = if (currentState.isEditing && nextEditingTransactionId == null) {
+                            ""
+                        } else {
+                            currentState.draftAmount
+                        },
+                        draftMerchant = if (currentState.isEditing && nextEditingTransactionId == null) {
+                            ""
+                        } else {
+                            currentState.draftMerchant
+                        },
+                        draftNote = if (currentState.isEditing && nextEditingTransactionId == null) {
+                            ""
+                        } else {
+                            currentState.draftNote
+                        },
                     )
                 }
             }
@@ -500,7 +681,41 @@ class TransactionsViewModel(
         }
     }
 
-    fun createTransaction() {
+    fun editTransaction(transactionId: String) {
+        _uiState.update { currentState ->
+            val transaction = currentState.transactions.firstOrNull { item -> item.id == transactionId }
+                ?: return@update currentState
+
+            val availableCategories = currentState.categories.filter { category ->
+                category.kind == transaction.type.categoryKind
+            }
+
+            currentState.copy(
+                selectedType = transaction.type,
+                selectedAccountId = transaction.accountId,
+                selectedCategoryId = transaction.categoryId
+                    ?.takeIf { selectedId ->
+                        availableCategories.any { category -> category.id == selectedId }
+                    }
+                    ?: availableCategories.firstOrNull()?.id,
+                draftAmount = formatTransactionAmountInput(transaction.amountMinor),
+                draftMerchant = transaction.merchantName.orEmpty(),
+                draftNote = transaction.note.orEmpty(),
+                editingTransactionId = transaction.id,
+                deleteConfirmationTransactionId = null,
+                pendingDeleteTransactionId = null,
+                errorMessage = null,
+            )
+        }
+    }
+
+    fun cancelEditing() {
+        _uiState.update { currentState ->
+            currentState.toCreateMode()
+        }
+    }
+
+    fun saveTransaction() {
         val snapshot = uiState.value
         val selectedAccount = snapshot.accounts.firstOrNull { it.id == snapshot.selectedAccountId }
         val selectedCategoryId = snapshot.selectedCategoryId
@@ -533,8 +748,11 @@ class TransactionsViewModel(
             }
 
             val now = Clock.System.now().toEpochMilliseconds()
+            val existingTransaction = snapshot.editingTransactionId?.let { editingId ->
+                snapshot.transactions.firstOrNull { transaction -> transaction.id == editingId }
+            }
             val transaction = FinanceTransaction(
-                id = generateTransactionId(snapshot.selectedType, now),
+                id = existingTransaction?.id ?: generateTransactionId(snapshot.selectedType, now),
                 accountId = validatedAccount.id,
                 categoryId = selectedCategoryId,
                 type = snapshot.selectedType,
@@ -542,23 +760,67 @@ class TransactionsViewModel(
                 currencyCode = validatedAccount.currencyCode,
                 merchantName = snapshot.draftMerchant.trim().ifBlank { null },
                 note = snapshot.draftNote.trim().ifBlank { null },
-                sourceProvider = null,
-                externalTransactionId = null,
-                postedAtEpochMs = now,
-                createdAtEpochMs = now,
+                sourceProvider = existingTransaction?.sourceProvider,
+                externalTransactionId = existingTransaction?.externalTransactionId,
+                postedAtEpochMs = existingTransaction?.postedAtEpochMs ?: now,
+                createdAtEpochMs = existingTransaction?.createdAtEpochMs ?: now,
                 updatedAtEpochMs = now,
             )
 
             ledgerRepository.upsertTransaction(transaction)
 
             _uiState.update { currentState ->
-                currentState.copy(
-                    draftAmount = "",
-                    draftMerchant = "",
-                    draftNote = "",
+                currentState.toCreateMode().copy(
+                    selectedType = snapshot.selectedType,
+                    selectedAccountId = snapshot.selectedAccountId,
+                    selectedCategoryId = snapshot.selectedCategoryId,
                     isSaving = false,
+                )
+            }
+        }
+    }
+
+    fun requestDeleteTransaction(transactionId: String) {
+        _uiState.update { currentState ->
+            currentState.copy(
+                deleteConfirmationTransactionId = transactionId,
+                errorMessage = null,
+            )
+        }
+    }
+
+    fun dismissDeleteDialog() {
+        _uiState.update { currentState ->
+            currentState.copy(
+                deleteConfirmationTransactionId = null,
+                errorMessage = null,
+            )
+        }
+    }
+
+    fun confirmDeleteTransaction() {
+        val transactionId = uiState.value.deleteConfirmationTransactionId ?: return
+
+        viewModelScope.launch {
+            _uiState.update { currentState ->
+                currentState.copy(
+                    deleteConfirmationTransactionId = null,
+                    pendingDeleteTransactionId = transactionId,
                     errorMessage = null,
                 )
+            }
+
+            ledgerRepository.deleteTransaction(transactionId)
+
+            _uiState.update { currentState ->
+                if (currentState.editingTransactionId == transactionId) {
+                    currentState.toCreateMode()
+                } else {
+                    currentState.copy(
+                        pendingDeleteTransactionId = null,
+                        errorMessage = null,
+                    )
+                }
             }
         }
     }
@@ -626,9 +888,28 @@ internal fun parseTransactionAmountToMinor(rawValue: String): Long? {
 internal fun generateTransactionId(type: TransactionType, timestampMs: Long): String =
     "txn-${type.name.lowercase()}-$timestampMs-${Random.nextInt(1000, 9999)}"
 
+internal fun formatTransactionAmountInput(amountMinor: Long): String {
+    val absoluteAmount = kotlin.math.abs(amountMinor)
+    val major = absoluteAmount / 100
+    val minor = absoluteAmount % 100
+    return "$major.${minor.toString().padStart(2, '0')}"
+}
+
 internal fun formatTransactionMoney(amountMinor: Long, currencyCode: String): String {
     val absoluteAmount = kotlin.math.abs(amountMinor)
     val major = absoluteAmount / 100
     val minor = absoluteAmount % 100
     return "$major.${minor.toString().padStart(2, '0')} $currencyCode"
 }
+
+private fun TransactionsUiState.toCreateMode(): TransactionsUiState =
+    copy(
+        draftAmount = "",
+        draftMerchant = "",
+        draftNote = "",
+        editingTransactionId = null,
+        deleteConfirmationTransactionId = null,
+        isSaving = false,
+        pendingDeleteTransactionId = null,
+        errorMessage = null,
+    )
