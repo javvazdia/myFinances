@@ -59,6 +59,12 @@ class LocalLedgerRepository(
         database.transactionDao().upsertTransaction(TransactionEntityMapper.toEntity(transaction))
     }
 
+    override suspend fun deleteCategory(categoryId: String) {
+        database.categoryDao().getCategoryById(categoryId)?.let { category ->
+            database.categoryDao().deleteCategory(category)
+        }
+    }
+
     override suspend fun deleteTransaction(transactionId: String) {
         database.transactionDao().deleteTransactionById(transactionId)
     }

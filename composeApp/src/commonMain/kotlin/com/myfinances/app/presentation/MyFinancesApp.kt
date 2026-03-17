@@ -20,6 +20,7 @@ import com.myfinances.app.navigation.AppDestination
 import com.myfinances.app.platform.Platform
 import com.myfinances.app.presentation.accounts.AccountsRoute
 import com.myfinances.app.presentation.overview.OverviewRoute
+import com.myfinances.app.presentation.settings.SettingsRoute
 import com.myfinances.app.presentation.transactions.TransactionsRoute
 import com.myfinances.app.presentation.shared.PlaceholderScreen
 
@@ -87,9 +88,8 @@ fun MyFinancesApp(appDependencies: AppDependencies) {
                 )
             }
             composable(AppDestination.Settings.route) {
-                PlaceholderScreen(
-                    title = "Settings",
-                    description = "Use this area later for currency, categories, backups, and sync preferences.",
+                SettingsRoute(
+                    ledgerRepository = appDependencies.ledgerRepository,
                 )
             }
         }

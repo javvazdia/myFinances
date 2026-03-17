@@ -25,5 +25,7 @@ interface LedgerRepository {
 
     suspend fun upsertTransaction(transaction: FinanceTransaction)
 
+    suspend fun deleteCategory(categoryId: String)
+
     suspend fun deleteTransaction(transactionId: String)
 }
