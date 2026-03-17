@@ -90,6 +90,7 @@ fun MyFinancesApp(appDependencies: AppDependencies) {
             composable(AppDestination.Settings.route) {
                 SettingsRoute(
                     ledgerRepository = appDependencies.ledgerRepository,
+                    externalConnectionsRepository = appDependencies.externalConnectionsRepository,
                 )
             }
         }

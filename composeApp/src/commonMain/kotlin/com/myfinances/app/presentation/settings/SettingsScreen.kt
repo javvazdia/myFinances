@@ -40,10 +40,18 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.myfinances.app.domain.model.Category
 import com.myfinances.app.domain.model.CategoryKind
+import com.myfinances.app.domain.model.integration.ExternalConnection
+import com.myfinances.app.domain.model.integration.ExternalConnectionStatus
+import com.myfinances.app.domain.model.integration.ExternalIntegrationStage
+import com.myfinances.app.domain.model.integration.ExternalProviderCatalog
+import com.myfinances.app.domain.model.integration.ExternalProviderDefinition
+import com.myfinances.app.domain.model.integration.ExternalSyncStatus
+import com.myfinances.app.domain.repository.ExternalConnectionsRepository
 import com.myfinances.app.domain.repository.LedgerRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -53,8 +61,12 @@ import kotlin.time.Clock
 @Composable
 fun SettingsRoute(
     ledgerRepository: LedgerRepository,
+    externalConnectionsRepository: ExternalConnectionsRepository,
     settingsViewModel: SettingsViewModel = viewModel {
-        SettingsViewModel(ledgerRepository)
+        SettingsViewModel(
+            ledgerRepository = ledgerRepository,
+            externalConnectionsRepository = externalConnectionsRepository,
+        )
     },
 ) {
     val uiState by settingsViewModel.uiState.collectAsState()
@@ -87,7 +99,7 @@ fun SettingsScreen(
 
     LaunchedEffect(uiState.editingCategoryId) {
         if (uiState.editingCategoryId != null) {
-            listState.animateScrollToItem(index = 2)
+            listState.animateScrollToItem(index = 3)
         }
     }
 
@@ -111,6 +123,10 @@ fun SettingsScreen(
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+
+        item {
+            ConnectionsOverviewCard(uiState = uiState)
         }
 
         item {
@@ -200,6 +216,89 @@ fun SettingsScreen(
                 }
             },
         )
+    }
+}
+
+@Composable
+private fun ConnectionsOverviewCard(uiState: SettingsUiState) {
+    Card {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = "Connections",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+            )
+
+            Text(
+                text = "This new foundation is provider-agnostic. Indexa is the first target, but the same connection and sync model is meant to support more brokers and banks later.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            ExternalProviderCatalog.availableProviders.forEach { provider ->
+                val connection = uiState.connections.firstOrNull { item ->
+                    item.providerId == provider.id
+                }
+                ProviderCard(
+                    provider = provider,
+                    connection = connection,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProviderCard(
+    provider: ExternalProviderDefinition,
+    connection: ExternalConnection?,
+) {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+        ),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column(modifier = Modifier.fillMaxWidth(0.7f)) {
+                    Text(
+                        text = provider.displayName,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text = provider.summary,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+
+                Text(
+                    text = connection?.status?.label ?: provider.stage.label,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+
+            Text(
+                text = buildConnectionStatusMessage(provider, connection),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 
@@ -402,6 +501,7 @@ private fun CategoryCard(
 }
 
 data class SettingsUiState(
+    val connections: List<ExternalConnection> = emptyList(),
     val categories: List<Category> = emptyList(),
     val draftName: String = "",
     val selectedKind: CategoryKind = CategoryKind.EXPENSE,
@@ -428,15 +528,22 @@ data class SettingsUiState(
 
 class SettingsViewModel(
     private val ledgerRepository: LedgerRepository,
+    private val externalConnectionsRepository: ExternalConnectionsRepository,
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(SettingsUiState())
     val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()
 
     init {
         viewModelScope.launch {
-            ledgerRepository.observeCategories().collect { categories ->
+            combine(
+                ledgerRepository.observeCategories(),
+                externalConnectionsRepository.observeConnections(),
+            ) { categories, connections ->
+                categories to connections
+            }.collect { (categories, connections) ->
                 _uiState.update { currentState ->
                     currentState.copy(
+                        connections = connections,
                         categories = categories,
                         editingCategoryId = currentState.editingCategoryId
                             ?.takeIf { editingId ->
@@ -659,3 +766,47 @@ private fun SettingsUiState.toCreateMode(): SettingsUiState =
         pendingDeleteCategoryId = null,
         errorMessage = null,
     )
+
+private val ExternalIntegrationStage.label: String
+    get() = when (this) {
+        ExternalIntegrationStage.PLANNED -> "Planned"
+        ExternalIntegrationStage.SCAFFOLDED -> "Scaffolded"
+        ExternalIntegrationStage.ACTIVE -> "Active"
+    }
+
+private val ExternalConnectionStatus.label: String
+    get() = when (this) {
+        ExternalConnectionStatus.NOT_CONNECTED -> "Not connected"
+        ExternalConnectionStatus.NEEDS_ATTENTION -> "Needs attention"
+        ExternalConnectionStatus.CONNECTED -> "Connected"
+        ExternalConnectionStatus.SYNCING -> "Syncing"
+    }
+
+private fun buildConnectionStatusMessage(
+    provider: ExternalProviderDefinition,
+    connection: ExternalConnection?,
+): String {
+    if (connection == null) {
+        return when (provider.stage) {
+            ExternalIntegrationStage.PLANNED ->
+                "This provider is on the roadmap but not scaffolded yet."
+            ExternalIntegrationStage.SCAFFOLDED ->
+                "The shared connection and sync foundation is ready. The next step is the live token-based setup and import flow."
+            ExternalIntegrationStage.ACTIVE ->
+                "This provider is ready to be connected."
+        }
+    }
+
+    return when (connection.lastSyncStatus) {
+        ExternalSyncStatus.SUCCESS ->
+            "Last sync succeeded. The next step is to surface imported accounts, holdings, and sync history in the UI."
+        ExternalSyncStatus.FAILED ->
+            connection.lastErrorMessage ?: "The last sync failed and needs attention."
+        ExternalSyncStatus.PARTIAL ->
+            connection.lastErrorMessage ?: "The last sync completed partially."
+        ExternalSyncStatus.RUNNING ->
+            "A sync is currently running for this connection."
+        ExternalSyncStatus.IDLE ->
+            "This connection exists in local state, but a live sync flow has not been completed yet."
+    }
+}
