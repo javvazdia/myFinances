@@ -20,6 +20,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.MaterialTheme
@@ -49,18 +50,17 @@ import com.myfinances.app.domain.model.CategoryKind
 import com.myfinances.app.domain.model.FinanceTransaction
 import com.myfinances.app.domain.model.TransactionType
 import com.myfinances.app.domain.repository.LedgerRepository
+import com.myfinances.app.presentation.shared.formatDayLabel
+import com.myfinances.app.presentation.shared.formatMinorMoney
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
-import kotlinx.datetime.TimeZone
-import kotlinx.datetime.toLocalDateTime
 import kotlinx.coroutines.launch
 import kotlin.random.Random
 import kotlin.time.Clock
-import kotlin.time.Instant
 
 @Composable
 fun TransactionsRoute(
@@ -312,7 +312,7 @@ private fun TransactionFormCard(
                     onValueChange = {},
                     modifier = Modifier
                         .fillMaxWidth()
-                        .menuAnchor(),
+                        .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
                     readOnly = true,
                     enabled = !uiState.isBusy,
                     label = { Text("Transaction type") },
@@ -345,7 +345,7 @@ private fun TransactionFormCard(
                     onValueChange = {},
                     modifier = Modifier
                         .fillMaxWidth()
-                        .menuAnchor(),
+                        .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
                     readOnly = true,
                     enabled = !uiState.isBusy && uiState.accounts.isNotEmpty(),
                     label = { Text("Account") },
@@ -378,7 +378,7 @@ private fun TransactionFormCard(
                     onValueChange = {},
                     modifier = Modifier
                         .fillMaxWidth()
-                        .menuAnchor(),
+                        .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
                     readOnly = true,
                     enabled = !uiState.isBusy && uiState.availableCategories.isNotEmpty(),
                     label = { Text("Category") },
@@ -968,34 +968,14 @@ internal fun formatTransactionAmountInput(amountMinor: Long): String {
 }
 
 internal fun formatTransactionMoney(amountMinor: Long, currencyCode: String): String {
-    val absoluteAmount = kotlin.math.abs(amountMinor)
-    val major = absoluteAmount / 100
-    val minor = absoluteAmount % 100
-    return "$major.${minor.toString().padStart(2, '0')} $currencyCode"
+    return formatMinorMoney(amountMinor, currencyCode)
 }
 
 internal fun formatTransactionDateLabel(
     epochMs: Long,
     nowEpochMs: Long = Clock.System.now().toEpochMilliseconds(),
 ): String {
-    val timeZone = TimeZone.currentSystemDefault()
-    val currentDate = Instant
-        .fromEpochMilliseconds(nowEpochMs)
-        .toLocalDateTime(timeZone)
-        .date
-    val transactionDate = Instant
-        .fromEpochMilliseconds(epochMs)
-        .toLocalDateTime(timeZone)
-        .date
-
-    if (currentDate == transactionDate) return "Today"
-
-    val month = transactionDate.month.name
-        .lowercase()
-        .replaceFirstChar { character -> character.uppercase() }
-        .take(3)
-
-    return "$month ${transactionDate.day}"
+    return formatDayLabel(epochMs, nowEpochMs)
 }
 
 private fun TransactionsUiState.toCreateMode(): TransactionsUiState =

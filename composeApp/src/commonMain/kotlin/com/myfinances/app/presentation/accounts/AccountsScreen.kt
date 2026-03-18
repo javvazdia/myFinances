@@ -20,6 +20,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.MaterialTheme
@@ -48,6 +49,8 @@ import com.myfinances.app.domain.model.AccountSourceType
 import com.myfinances.app.domain.model.AccountType
 import com.myfinances.app.domain.model.InvestmentPosition
 import com.myfinances.app.domain.repository.LedgerRepository
+import com.myfinances.app.presentation.shared.formatMinorMoney
+import com.myfinances.app.presentation.shared.formatTimestampLabel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -55,11 +58,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.datetime.TimeZone
-import kotlinx.datetime.toLocalDateTime
 import kotlin.random.Random
 import kotlin.time.Clock
-import kotlin.time.Instant
 
 @Composable
 fun AccountsRoute(
@@ -344,7 +344,7 @@ private fun AccountFormCard(
                     onValueChange = {},
                     modifier = Modifier
                         .fillMaxWidth()
-                        .menuAnchor(),
+                        .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
                     readOnly = true,
                     enabled = !uiState.isBusy,
                     label = { Text("Account type") },
@@ -1041,26 +1041,12 @@ internal fun generateAccountId(name: String, timestampMs: Long): String {
 }
 
 internal fun formatMoney(amountMinor: Long, currencyCode: String): String {
-    val sign = if (amountMinor < 0) "-" else ""
-    val absoluteAmount = kotlin.math.abs(amountMinor)
-    val major = absoluteAmount / 100
-    val minor = absoluteAmount % 100
-    return "$sign$major.${minor.toString().padStart(2, '0')} $currencyCode"
+    return formatMinorMoney(amountMinor, currencyCode)
 }
 
 internal fun formatSyncTimestamp(epochMs: Long?): String {
     if (epochMs == null) return "Not synced yet"
-
-    val localDateTime = Instant
-        .fromEpochMilliseconds(epochMs)
-        .toLocalDateTime(TimeZone.currentSystemDefault())
-
-    val month = localDateTime.month.name
-        .lowercase()
-        .replaceFirstChar { character -> character.uppercase() }
-        .take(3)
-
-    return "$month ${localDateTime.day}, ${localDateTime.hour.toString().padStart(2, '0')}:${localDateTime.minute.toString().padStart(2, '0')}"
+    return formatTimestampLabel(epochMs)
 }
 
 internal fun buildPositionSubtitle(position: InvestmentPosition): String {
