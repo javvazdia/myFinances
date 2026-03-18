@@ -3,7 +3,9 @@ package com.myfinances.app.integrations.indexa.sync
 import com.myfinances.app.domain.model.Account
 import com.myfinances.app.domain.model.AccountSourceType
 import com.myfinances.app.domain.model.AccountType
+import com.myfinances.app.domain.model.FinanceTransaction
 import com.myfinances.app.domain.model.InvestmentPosition
+import com.myfinances.app.domain.model.TransactionType
 import com.myfinances.app.domain.model.integration.ExternalAccountLink
 import com.myfinances.app.domain.model.integration.ExternalConnection
 import com.myfinances.app.domain.model.integration.ExternalConnectionStatus
@@ -15,10 +17,14 @@ import com.myfinances.app.domain.repository.ExternalConnectionsRepository
 import com.myfinances.app.domain.repository.LedgerRepository
 import com.myfinances.app.integrations.indexa.api.IndexaApiClient
 import com.myfinances.app.integrations.indexa.model.IndexaAccountSummary
+import com.myfinances.app.integrations.indexa.model.IndexaCashTransaction
 import com.myfinances.app.integrations.indexa.model.IndexaConnectionPreview
 import com.myfinances.app.integrations.indexa.model.IndexaPortfolioSnapshot
 import com.myfinances.app.integrations.indexa.model.IndexaPortfolioPosition
 import kotlinx.coroutines.flow.first
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.atStartOfDayIn
 import kotlin.math.roundToLong
 import kotlin.random.Random
 import kotlin.time.Clock
@@ -112,6 +118,7 @@ class StubIndexaIntegrationService(
             val existingLinks = externalConnectionsRepository.observeAccountLinks(connectionId).first()
             val importedAt = Clock.System.now().toEpochMilliseconds()
             var importedPositionsCount = 0
+            var importedTransactionsCount = 0
 
             val updatedLinks = providerAccounts.mapIndexed { index, providerAccount ->
                 val existingLink = existingLinks.firstOrNull { link ->
@@ -128,6 +135,10 @@ class StubIndexaIntegrationService(
                     accessToken = accessToken,
                     accountNumber = providerAccount.accountNumber,
                 )
+                val cashTransactions = apiClient.fetchCashTransactions(
+                    accessToken = accessToken,
+                    accountNumber = providerAccount.accountNumber,
+                )
                 val updatedAccount = providerAccount.toLocalAccount(
                     localAccountId = localAccountId,
                     existingAccount = existingAccount,
@@ -138,13 +149,24 @@ class StubIndexaIntegrationService(
                     localAccountId = localAccountId,
                     syncedAtEpochMs = importedAt,
                 )
+                val ledgerTransactions = cashTransactions.mapNotNull { transaction ->
+                    transaction.toLedgerTransaction(
+                        localAccountId = localAccountId,
+                        fallbackCurrencyCode = updatedAccount.currencyCode,
+                        syncedAtEpochMs = importedAt,
+                    )
+                }
 
                 ledgerRepository.upsertAccount(updatedAccount)
                 ledgerRepository.replaceInvestmentPositions(
                     accountId = localAccountId,
                     positions = positions,
                 )
+                ledgerTransactions.forEach { transaction ->
+                    ledgerRepository.upsertTransaction(transaction)
+                }
                 importedPositionsCount += positions.size
+                importedTransactionsCount += ledgerTransactions.size
 
                 ExternalAccountLink(
                     connectionId = connectionId,
@@ -181,10 +203,11 @@ class StubIndexaIntegrationService(
                 finishedAtEpochMs = completedAt,
                 status = ExternalSyncStatus.SUCCESS,
                 importedAccounts = updatedLinks.size,
-                importedTransactions = 0,
+                importedTransactions = importedTransactionsCount,
                 importedPositions = importedPositionsCount,
                 message = buildSyncSuccessMessage(
                     importedAccounts = updatedLinks.size,
+                    importedTransactions = importedTransactionsCount,
                     importedPositions = importedPositionsCount,
                 ),
             )
@@ -331,11 +354,13 @@ private fun IndexaPortfolioPosition.toInvestmentPosition(
 
 private fun buildSyncSuccessMessage(
     importedAccounts: Int,
+    importedTransactions: Int,
     importedPositions: Int,
 ): String {
     val accountLabel = if (importedAccounts == 1) "account" else "accounts"
+    val transactionLabel = if (importedTransactions == 1) "cash transaction" else "cash transactions"
     val positionLabel = if (importedPositions == 1) "position" else "positions"
-    return "Imported $importedAccounts Indexa $accountLabel and $importedPositions portfolio $positionLabel into the local ledger."
+    return "Imported $importedAccounts Indexa $accountLabel, $importedTransactions $transactionLabel, and $importedPositions portfolio $positionLabel into the local ledger."
 }
 
 private fun buildInvestmentPositionId(
@@ -354,3 +379,61 @@ private fun buildInvestmentPositionId(
 
     return "position-$accountId-$slug-$index"
 }
+
+private fun IndexaCashTransaction.toLedgerTransaction(
+    localAccountId: String,
+    fallbackCurrencyCode: String,
+    syncedAtEpochMs: Long,
+): FinanceTransaction? {
+    val minorAmount = amount.toMinorAmount() ?: return null
+    if (minorAmount == 0L) return null
+
+    val transactionType = classifyIndexaCashTransactionType()
+    val normalizedAmountMinor = when (transactionType) {
+        TransactionType.EXPENSE -> kotlin.math.abs(minorAmount)
+        TransactionType.INCOME -> kotlin.math.abs(minorAmount)
+        TransactionType.TRANSFER -> minorAmount
+        TransactionType.ADJUSTMENT -> minorAmount
+    }
+
+    return FinanceTransaction(
+        id = buildIndexaCashTransactionId(localAccountId, reference),
+        accountId = localAccountId,
+        categoryId = null,
+        type = transactionType,
+        amountMinor = normalizedAmountMinor,
+        currencyCode = normalizeIndexaCurrencyCode(currencyCode) ?: fallbackCurrencyCode,
+        merchantName = operationType?.takeIf(String::isNotBlank),
+        note = comments?.takeIf(String::isNotBlank),
+        sourceProvider = INDEXA_PROVIDER_NAME,
+        externalTransactionId = reference,
+        postedAtEpochMs = parseIndexaDateToEpochMs(date) ?: syncedAtEpochMs,
+        createdAtEpochMs = syncedAtEpochMs,
+        updatedAtEpochMs = syncedAtEpochMs,
+    )
+}
+
+private fun IndexaCashTransaction.classifyIndexaCashTransactionType(): TransactionType {
+    val descriptor = buildString {
+        append(operationType.orEmpty())
+        append(' ')
+        append(comments.orEmpty())
+    }.uppercase()
+
+    return when {
+        descriptor.contains("COMISION") || descriptor.contains("COMISI") || descriptor.contains("FEE") ->
+            if (amount >= 0.0) TransactionType.INCOME else TransactionType.EXPENSE
+        descriptor.contains("RETROCESION") || descriptor.contains("ABONO") || descriptor.contains("DEVOLU") ->
+            TransactionType.INCOME
+        else -> TransactionType.TRANSFER
+    }
+}
+
+private fun buildIndexaCashTransactionId(
+    localAccountId: String,
+    reference: String,
+): String = "txn-indexa-cash-$localAccountId-${reference.lowercase()}"
+
+private fun parseIndexaDateToEpochMs(value: String): Long? = runCatching {
+    LocalDate.parse(value).atStartOfDayIn(TimeZone.currentSystemDefault()).toEpochMilliseconds()
+}.getOrNull()

@@ -57,6 +57,8 @@ class StubIndexaApiClient : IndexaApiClient {
             date = "2026-03-01",
             amount = -3.0,
             currencyCode = "EUR",
+            fees = 0.0,
+            operationCode = 224,
             operationType = "CARGO COMISIONES",
             comments = "Demo fee transaction",
         ),

@@ -39,6 +39,8 @@ data class IndexaCashTransaction(
     val date: String,
     val amount: Double,
     val currencyCode: String,
+    val fees: Double?,
+    val operationCode: Int?,
     val operationType: String?,
     val comments: String?,
 )

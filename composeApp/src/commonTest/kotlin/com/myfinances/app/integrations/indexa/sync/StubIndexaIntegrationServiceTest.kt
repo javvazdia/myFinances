@@ -3,14 +3,24 @@ package com.myfinances.app.integrations.indexa.sync
 import com.myfinances.app.data.integration.InMemoryConnectionSecretStore
 import com.myfinances.app.data.integration.InMemoryExternalConnectionsRepository
 import com.myfinances.app.domain.model.Account
+import com.myfinances.app.domain.model.AccountSourceType
+import com.myfinances.app.domain.model.AccountType
 import com.myfinances.app.domain.model.Category
 import com.myfinances.app.domain.model.CategoryKind
 import com.myfinances.app.domain.model.FinanceTransaction
 import com.myfinances.app.domain.model.InvestmentPosition
+import com.myfinances.app.domain.model.TransactionType
 import com.myfinances.app.domain.model.integration.ExternalProviderId
 import com.myfinances.app.domain.model.integration.ExternalSyncStatus
 import com.myfinances.app.domain.repository.LedgerRepository
+import com.myfinances.app.integrations.indexa.api.IndexaApiClient
 import com.myfinances.app.integrations.indexa.api.StubIndexaApiClient
+import com.myfinances.app.integrations.indexa.model.IndexaAccountSummary
+import com.myfinances.app.integrations.indexa.model.IndexaCashTransaction
+import com.myfinances.app.integrations.indexa.model.IndexaInstrumentTransaction
+import com.myfinances.app.integrations.indexa.model.IndexaPortfolioPosition
+import com.myfinances.app.integrations.indexa.model.IndexaPortfolioSnapshot
+import com.myfinances.app.integrations.indexa.model.IndexaUserProfile
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
@@ -67,22 +77,54 @@ class StubIndexaIntegrationServiceTest {
         val syncRun = service.runSync(connection.id)
 
         val importedAccounts = ledgerRepository.observeAccounts(includeArchived = true).first()
+        val importedTransactions = ledgerRepository.observeAllTransactions().first()
         val updatedConnection = connectionsRepository.observeConnections().first().first()
         val links = connectionsRepository.observeAccountLinks(connection.id).first()
 
         assertEquals(ExternalSyncStatus.SUCCESS, syncRun.status)
         assertEquals(1, syncRun.importedAccounts)
+        assertEquals(1, syncRun.importedTransactions)
         assertEquals(1, syncRun.importedPositions)
         assertEquals(1, importedAccounts.size)
+        assertEquals(1, importedTransactions.size)
         assertEquals("Indexa Capital", importedAccounts.first().sourceProvider)
+        assertEquals("cash-demo-1", importedTransactions.first().externalTransactionId)
+        assertEquals(TransactionType.EXPENSE, importedTransactions.first().type)
+        assertEquals(300L, importedTransactions.first().amountMinor)
         assertEquals(ExternalSyncStatus.SUCCESS, updatedConnection.lastSyncStatus)
         assertTrue(links.first().localAccountId != null)
+    }
+
+    @Test
+    fun runSyncMapsNonFeeCashMovementsAsTransfers() = runBlocking {
+        val connectionsRepository = InMemoryExternalConnectionsRepository()
+        val secretStore = InMemoryConnectionSecretStore()
+        val ledgerRepository = FakeLedgerRepository()
+        val service = StubIndexaIntegrationService(
+            apiClient = TransferHeavyIndexaApiClient(),
+            ledgerRepository = ledgerRepository,
+            externalConnectionsRepository = connectionsRepository,
+            connectionSecretStore = secretStore,
+        )
+
+        val connection = service.connect("demo-token")
+
+        val syncRun = service.runSync(connection.id)
+        val importedTransactions = ledgerRepository.observeAllTransactions().first()
+
+        assertEquals(2, syncRun.importedTransactions)
+        assertEquals(2, importedTransactions.size)
+        assertEquals(TransactionType.TRANSFER, importedTransactions.first().type)
+        assertEquals(-2500L, importedTransactions.first().amountMinor)
+        assertEquals(TransactionType.EXPENSE, importedTransactions.last().type)
+        assertEquals(200L, importedTransactions.last().amountMinor)
     }
 }
 
 private class FakeLedgerRepository : LedgerRepository {
     private val accounts = MutableStateFlow<List<Account>>(emptyList())
     private val positionsByAccount = mutableMapOf<String, MutableStateFlow<List<InvestmentPosition>>>()
+    private val transactions = MutableStateFlow<List<FinanceTransaction>>(emptyList())
 
     override fun observeAccounts(includeArchived: Boolean): Flow<List<Account>> = accounts
 
@@ -94,12 +136,12 @@ private class FakeLedgerRepository : LedgerRepository {
     override fun observeCategories(kind: CategoryKind): Flow<List<Category>> = MutableStateFlow(emptyList())
 
     override fun observeRecentTransactions(limit: Int): Flow<List<FinanceTransaction>> =
-        MutableStateFlow(emptyList())
+        MutableStateFlow(transactions.value.take(limit))
 
-    override fun observeAllTransactions(): Flow<List<FinanceTransaction>> = MutableStateFlow(emptyList())
+    override fun observeAllTransactions(): Flow<List<FinanceTransaction>> = transactions
 
     override fun observeTransactionsForAccount(accountId: String): Flow<List<FinanceTransaction>> =
-        MutableStateFlow(emptyList())
+        MutableStateFlow(transactions.value.filter { transaction -> transaction.accountId == accountId })
 
     override suspend fun upsertAccount(account: Account) {
         accounts.value = accounts.value
@@ -116,11 +158,90 @@ private class FakeLedgerRepository : LedgerRepository {
 
     override suspend fun upsertCategory(category: Category) = Unit
 
-    override suspend fun upsertTransaction(transaction: FinanceTransaction) = Unit
+    override suspend fun upsertTransaction(transaction: FinanceTransaction) {
+        transactions.value = transactions.value
+            .filterNot { existing -> existing.id == transaction.id }
+            .plus(transaction)
+            .sortedByDescending(FinanceTransaction::postedAtEpochMs)
+    }
 
     override suspend fun deleteAccount(accountId: String) = Unit
 
     override suspend fun deleteCategory(categoryId: String) = Unit
 
     override suspend fun deleteTransaction(transactionId: String) = Unit
+}
+
+private class TransferHeavyIndexaApiClient : IndexaApiClient {
+    override suspend fun fetchUserProfile(accessToken: String): IndexaUserProfile =
+        IndexaUserProfile(
+            email = "indexa@example.com",
+            fullName = "Indexa Demo",
+            documentId = null,
+            accounts = fetchAccounts(accessToken),
+        )
+
+    override suspend fun fetchAccounts(accessToken: String): List<IndexaAccountSummary> = listOf(
+        IndexaAccountSummary(
+            accountNumber = "INDEXA-DEMO-02",
+            displayName = "Indexa Transfer Portfolio",
+            productType = "mutual",
+            providerCode = "INV",
+            currencyCode = "EUR",
+            currentValuation = 9_500.0,
+        ),
+    )
+
+    override suspend fun fetchPortfolio(
+        accessToken: String,
+        accountNumber: String,
+    ): IndexaPortfolioSnapshot = IndexaPortfolioSnapshot(
+        accountNumber = accountNumber,
+        valuationDate = "2026-03-18",
+        totalMarketValue = 9_500.0,
+        positions = listOf(
+            IndexaPortfolioPosition(
+                isin = "IE0032126645",
+                name = "Vanguard US 500 Stk Idx -Inst",
+                assetClass = "equity_north_america",
+                titles = 10.0,
+                price = 250.0,
+                marketValue = 2_500.0,
+                costAmount = 2_100.0,
+            ),
+        ),
+    )
+
+    override suspend fun fetchCashTransactions(
+        accessToken: String,
+        accountNumber: String,
+    ): List<IndexaCashTransaction> = listOf(
+        IndexaCashTransaction(
+            reference = "cash-transfer-1",
+            accountNumber = accountNumber,
+            date = "2026-03-03",
+            amount = -25.0,
+            currencyCode = "EUR",
+            fees = 0.0,
+            operationCode = 101,
+            operationType = "TRASPASO DE EFECTIVO",
+            comments = "Internal cash movement",
+        ),
+        IndexaCashTransaction(
+            reference = "cash-fee-1",
+            accountNumber = accountNumber,
+            date = "2026-03-02",
+            amount = -2.0,
+            currencyCode = "EUR",
+            fees = 0.0,
+            operationCode = 102,
+            operationType = "CARGO COMISIONES",
+            comments = "Platform fee",
+        ),
+    )
+
+    override suspend fun fetchInstrumentTransactions(
+        accessToken: String,
+        accountNumber: String,
+    ): List<IndexaInstrumentTransaction> = emptyList()
 }

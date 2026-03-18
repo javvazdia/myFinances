@@ -18,11 +18,11 @@ import io.ktor.http.HttpHeaders
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.Json
 
 private const val INDEXA_API_BASE_URL = "https://api.indexacapital.com"
 private const val INDEXA_AUTH_HEADER = "X-AUTH-TOKEN"
@@ -105,9 +105,25 @@ class KtorIndexaApiClient(
         accessToken: String,
         accountNumber: String,
     ): List<IndexaCashTransaction> {
-        throw UnsupportedOperationException(
-            "Live cash transaction sync is the next implementation step after connection setup.",
-        )
+        val response = httpClient.get {
+            url("$INDEXA_API_BASE_URL/accounts/$accountNumber/cash-transactions")
+            header(INDEXA_AUTH_HEADER, accessToken)
+            header(HttpHeaders.Accept, ContentType.Application.Json.toString())
+        }.body<List<IndexaCashTransactionResponse>>()
+
+        return response.map { transaction ->
+            IndexaCashTransaction(
+                reference = transaction.reference,
+                accountNumber = transaction.accountNumber,
+                date = transaction.date,
+                amount = transaction.amount,
+                currencyCode = transaction.currency,
+                fees = transaction.fees,
+                operationCode = transaction.operationCode,
+                operationType = transaction.operationType?.trim(),
+                comments = transaction.comments?.trim(),
+            )
+        }
     }
 
     override suspend fun fetchInstrumentTransactions(
@@ -192,4 +208,24 @@ private data class IndexaInstrumentResponse(
     val name: String? = null,
     @SerialName("asset_class")
     val assetClass: String? = null,
+)
+
+@Serializable
+private data class IndexaCashTransactionResponse(
+    @SerialName("account_number")
+    val accountNumber: String,
+    val amount: Double,
+    val comments: String? = null,
+    val currency: String,
+    val date: String,
+    val fees: Double? = null,
+    @SerialName("operation_code")
+    val operationCode: Int? = null,
+    @SerialName("operation_type")
+    val operationType: String? = null,
+    val reference: String,
+    val status: String? = null,
+    @SerialName("instrument_transaction")
+    val instrumentTransaction: JsonElement? = null,
+    val document: JsonElement? = null,
 )

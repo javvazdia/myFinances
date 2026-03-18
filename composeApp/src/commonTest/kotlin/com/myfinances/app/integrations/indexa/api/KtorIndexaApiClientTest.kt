@@ -6,6 +6,11 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
 class KtorIndexaApiClientTest {
+    private val testJson = Json {
+        ignoreUnknownKeys = true
+        explicitNulls = false
+    }
+
     @Test
     fun extractsPersonNameWhenPersonIsObject() {
         val person = Json.parseToJsonElement("""{"name":"Jane Doe"}""")
@@ -22,7 +27,7 @@ class KtorIndexaApiClientTest {
 
     @Test
     fun mapsPortfolioPositionsFromIndexaResponse() {
-        val response = Json.decodeFromString<PortfolioResponseForTest>(
+        val response = testJson.decodeFromString<PortfolioResponseForTest>(
             """
             {
               "portfolio": {
@@ -58,6 +63,52 @@ class KtorIndexaApiClientTest {
         assertEquals(1, snapshot.positions.size)
         assertEquals("IE0032126645", snapshot.positions.first().isin)
         assertEquals("Vanguard US 500 Stk Idx -Inst", snapshot.positions.first().name)
+    }
+
+    @Test
+    fun mapsCashTransactionsFromIndexaResponse() {
+        val response = testJson.decodeFromString<List<CashTransactionResponseForTest>>(
+            """
+            [
+              {
+                "account_number": "INDEXA01",
+                "amount": -3,
+                "comments": "COMISI",
+                "currency": "EUR",
+                "date": "2016-03-31",
+                "fees": 0,
+                "operation_code": 5324,
+                "operation_type": "COMISIÓN TRASPASO FONDO",
+                "reference": "423999710",
+                "status": "closed",
+                "instrument_transaction": {},
+                "document": []
+              },
+              {
+                "account_number": "INDEXA01",
+                "amount": 12,
+                "comments": "RETROCESION COMISION MTTO C/C",
+                "currency": "EUR",
+                "date": "2016-12-23",
+                "fees": 0,
+                "operation_code": 4567,
+                "operation_type": "RETROCESION COMISION MTTO C/C",
+                "reference": "444621886",
+                "status": "closed",
+                "instrument_transaction": [],
+                "document": []
+              }
+            ]
+            """.trimIndent(),
+        )
+
+        val transactions = response.toCashTransactions()
+
+        assertEquals(2, transactions.size)
+        assertEquals("423999710", transactions.first().reference)
+        assertEquals(-3.0, transactions.first().amount)
+        assertEquals("COMISIÓN TRASPASO FONDO", transactions.first().operationType)
+        assertEquals(4567, transactions.last().operationCode)
     }
 }
 
@@ -119,3 +170,34 @@ private fun PortfolioResponseForTest.toSnapshot() = com.myfinances.app.integrati
             }
         },
 )
+
+@kotlinx.serialization.Serializable
+private data class CashTransactionResponseForTest(
+    @kotlinx.serialization.SerialName("account_number")
+    val accountNumber: String,
+    val amount: Double,
+    val comments: String? = null,
+    val currency: String,
+    val date: String,
+    val fees: Double? = null,
+    @kotlinx.serialization.SerialName("operation_code")
+    val operationCode: Int? = null,
+    @kotlinx.serialization.SerialName("operation_type")
+    val operationType: String? = null,
+    val reference: String,
+)
+
+private fun List<CashTransactionResponseForTest>.toCashTransactions() =
+    map { transaction ->
+        com.myfinances.app.integrations.indexa.model.IndexaCashTransaction(
+            reference = transaction.reference,
+            accountNumber = transaction.accountNumber,
+            date = transaction.date,
+            amount = transaction.amount,
+            currencyCode = transaction.currency,
+            fees = transaction.fees,
+            operationCode = transaction.operationCode,
+            operationType = transaction.operationType?.trim(),
+            comments = transaction.comments?.trim(),
+        )
+    }
