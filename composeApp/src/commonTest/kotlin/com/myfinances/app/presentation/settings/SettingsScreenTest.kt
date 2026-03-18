@@ -5,6 +5,7 @@ import com.myfinances.app.domain.model.CategoryKind
 import com.myfinances.app.domain.model.integration.ExternalConnection
 import com.myfinances.app.domain.model.integration.ExternalConnectionStatus
 import com.myfinances.app.domain.model.integration.ExternalProviderId
+import com.myfinances.app.domain.model.integration.ExternalSyncRun
 import com.myfinances.app.domain.model.integration.ExternalSyncStatus
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -70,5 +71,45 @@ class SettingsScreenTest {
 
         assertEquals(1, uiState.connections.size)
         assertEquals(ExternalProviderId.INDEXA, uiState.connections.first().providerId)
+    }
+
+    @Test
+    fun keepsSyncRunsMappedByConnection() {
+        val syncRun = ExternalSyncRun(
+            id = "sync-1",
+            connectionId = "conn-indexa-1",
+            providerId = ExternalProviderId.INDEXA,
+            startedAtEpochMs = 1L,
+            finishedAtEpochMs = 2L,
+            status = ExternalSyncStatus.SUCCESS,
+            importedAccounts = 1,
+            importedTransactions = 4,
+            importedPositions = 2,
+            message = "Imported data.",
+        )
+        val uiState = SettingsUiState(
+            syncRunsByConnection = mapOf("conn-indexa-1" to listOf(syncRun)),
+        )
+
+        assertEquals(1, uiState.syncRunsByConnection["conn-indexa-1"]?.size)
+        assertEquals("sync-1", uiState.syncRunsByConnection["conn-indexa-1"]?.first()?.id)
+    }
+
+    @Test
+    fun formatsSyncRunSummaryCounts() {
+        val syncRun = ExternalSyncRun(
+            id = "sync-1",
+            connectionId = "conn-indexa-1",
+            providerId = ExternalProviderId.INDEXA,
+            startedAtEpochMs = 1L,
+            finishedAtEpochMs = 2L,
+            status = ExternalSyncStatus.SUCCESS,
+            importedAccounts = 1,
+            importedTransactions = 3,
+            importedPositions = 2,
+            message = null,
+        )
+
+        assertEquals("1 account, 3 transactions, 2 positions", buildSyncRunSummary(syncRun))
     }
 }

@@ -45,6 +45,7 @@ import com.myfinances.app.domain.model.integration.ExternalConnectionStatus
 import com.myfinances.app.domain.model.integration.ExternalIntegrationStage
 import com.myfinances.app.domain.model.integration.ExternalProviderCatalog
 import com.myfinances.app.domain.model.integration.ExternalProviderDefinition
+import com.myfinances.app.domain.model.integration.ExternalSyncRun
 import com.myfinances.app.domain.model.integration.ExternalSyncStatus
 import com.myfinances.app.domain.repository.ExternalConnectionsRepository
 import com.myfinances.app.domain.repository.LedgerRepository
@@ -55,10 +56,15 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 import kotlin.random.Random
 import kotlin.time.Clock
+import kotlin.time.Instant
 
 @Composable
 fun SettingsRoute(
@@ -296,6 +302,9 @@ private fun IndexaSetupCard(
     val indexaConnection = uiState.connections.firstOrNull { connection ->
         connection.providerId == com.myfinances.app.domain.model.integration.ExternalProviderId.INDEXA
     }
+    val indexaSyncRuns = indexaConnection
+        ?.let { connection -> uiState.syncRunsByConnection[connection.id].orEmpty() }
+        .orEmpty()
 
     Card(
         colors = CardDefaults.cardColors(
@@ -378,6 +387,104 @@ private fun IndexaSetupCard(
 
             if (uiState.indexaPreview != null) {
                 IndexaPreviewSection(preview = uiState.indexaPreview)
+            }
+
+            SyncHistorySection(
+                syncRuns = indexaSyncRuns,
+                isSyncing = uiState.isSyncingIndexa,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SyncHistorySection(
+    syncRuns: List<ExternalSyncRun>,
+    isSyncing: Boolean,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            text = "Recent sync history",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+        )
+
+        if (syncRuns.isEmpty()) {
+            Text(
+                text = if (isSyncing) {
+                    "A sync is running now. The first completed run will appear here."
+                } else {
+                    "No sync runs yet. Save the connection and use Sync now to start building sync history."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            return@Column
+        }
+
+        syncRuns
+            .sortedByDescending(ExternalSyncRun::startedAtEpochMs)
+            .take(5)
+            .forEach { syncRun ->
+                SyncRunCard(syncRun = syncRun)
+            }
+    }
+}
+
+@Composable
+private fun SyncRunCard(syncRun: ExternalSyncRun) {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+        ),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    text = syncRun.status.label,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = when (syncRun.status) {
+                        ExternalSyncStatus.SUCCESS -> MaterialTheme.colorScheme.primary
+                        ExternalSyncStatus.FAILED -> MaterialTheme.colorScheme.error
+                        ExternalSyncStatus.PARTIAL -> MaterialTheme.colorScheme.tertiary
+                        ExternalSyncStatus.RUNNING -> MaterialTheme.colorScheme.primary
+                        ExternalSyncStatus.IDLE -> MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+                Text(
+                    text = formatSyncRunTimestamp(syncRun.startedAtEpochMs),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            Text(
+                text = buildSyncRunSummary(syncRun),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+
+            if (syncRun.finishedAtEpochMs != null) {
+                Text(
+                    text = "Finished ${formatSyncRunTimestamp(syncRun.finishedAtEpochMs)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            if (!syncRun.message.isNullOrBlank()) {
+                Text(
+                    text = syncRun.message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }
@@ -683,6 +790,7 @@ private fun CategoryCard(
 
 data class SettingsUiState(
     val connections: List<ExternalConnection> = emptyList(),
+    val syncRunsByConnection: Map<String, List<ExternalSyncRun>> = emptyMap(),
     val categories: List<Category> = emptyList(),
     val draftIndexaToken: String = "",
     val indexaPreview: IndexaConnectionPreview? = null,
@@ -723,16 +831,34 @@ class SettingsViewModel(
     val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()
 
     init {
+        val connectionsFlow = externalConnectionsRepository.observeConnections()
+
         viewModelScope.launch {
             combine(
                 ledgerRepository.observeCategories(),
-                externalConnectionsRepository.observeConnections(),
-            ) { categories, connections ->
-                categories to connections
-            }.collect { (categories, connections) ->
+                connectionsFlow,
+                connectionsFlow.flatMapLatest { connections ->
+                    if (connections.isEmpty()) {
+                        flowOf(emptyMap())
+                    } else {
+                        combine(
+                            connections.map { connection ->
+                                externalConnectionsRepository.observeSyncRuns(connection.id)
+                            },
+                        ) { syncRunLists ->
+                            connections.zip(syncRunLists).associate { (connection, syncRuns) ->
+                                connection.id to syncRuns.sortedByDescending(ExternalSyncRun::startedAtEpochMs)
+                            }
+                        }
+                    }
+                },
+            ) { categories, connections, syncRunsByConnection ->
+                Triple(categories, connections, syncRunsByConnection)
+            }.collect { (categories, connections, syncRunsByConnection) ->
                 _uiState.update { currentState ->
                     currentState.copy(
                         connections = connections,
+                        syncRunsByConnection = syncRunsByConnection,
                         categories = categories,
                         editingCategoryId = currentState.editingCategoryId
                             ?.takeIf { editingId ->
@@ -1128,6 +1254,15 @@ private val ExternalConnectionStatus.label: String
         ExternalConnectionStatus.SYNCING -> "Syncing"
     }
 
+private val ExternalSyncStatus.label: String
+    get() = when (this) {
+        ExternalSyncStatus.IDLE -> "Idle"
+        ExternalSyncStatus.SUCCESS -> "Success"
+        ExternalSyncStatus.FAILED -> "Failed"
+        ExternalSyncStatus.PARTIAL -> "Partial"
+        ExternalSyncStatus.RUNNING -> "Running"
+    }
+
 private fun buildConnectionStatusMessage(
     provider: ExternalProviderDefinition,
     connection: ExternalConnection?,
@@ -1155,4 +1290,26 @@ private fun buildConnectionStatusMessage(
         ExternalSyncStatus.IDLE ->
             "This connection exists in local state, but a live sync flow has not been completed yet."
     }
+}
+
+internal fun formatSyncRunTimestamp(epochMs: Long): String {
+    val localDateTime = Instant
+        .fromEpochMilliseconds(epochMs)
+        .toLocalDateTime(TimeZone.currentSystemDefault())
+    val month = localDateTime.month.name
+        .lowercase()
+        .replaceFirstChar { character -> character.uppercase() }
+        .take(3)
+    val day = localDateTime.dayOfMonth
+    val hour = localDateTime.hour.toString().padStart(2, '0')
+    val minute = localDateTime.minute.toString().padStart(2, '0')
+    return "$month $day, $hour:$minute"
+}
+
+internal fun buildSyncRunSummary(syncRun: ExternalSyncRun): String {
+    val accountLabel = if (syncRun.importedAccounts == 1) "account" else "accounts"
+    val transactionLabel = if (syncRun.importedTransactions == 1) "transaction" else "transactions"
+    val positionLabel = if (syncRun.importedPositions == 1) "position" else "positions"
+
+    return "${syncRun.importedAccounts} $accountLabel, ${syncRun.importedTransactions} $transactionLabel, ${syncRun.importedPositions} $positionLabel"
 }
