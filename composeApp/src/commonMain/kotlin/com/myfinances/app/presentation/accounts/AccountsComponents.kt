@@ -234,6 +234,7 @@ internal fun AccountFormCard(
 @Composable
 internal fun AccountCard(
     account: Account,
+    currentBalanceMinor: Long,
     onSelectAccount: (String) -> Unit,
     onEditAccount: (String) -> Unit,
     onRequestDeleteAccount: (String) -> Unit,
@@ -269,7 +270,7 @@ internal fun AccountCard(
                 }
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = formatMoney(account.openingBalanceMinor, account.currencyCode),
+                    text = formatMoney(currentBalanceMinor, account.currencyCode),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
@@ -323,6 +324,7 @@ internal fun AccountCard(
 @Composable
 internal fun AccountDetailScreen(
     account: Account,
+    currentBalanceMinor: Long,
     positions: List<InvestmentPosition>,
     onBack: () -> Unit,
     onEditAccount: (String) -> Unit,
@@ -350,7 +352,10 @@ internal fun AccountDetailScreen(
         }
 
         item {
-            AccountSummaryCard(account = account)
+            AccountSummaryCard(
+                account = account,
+                currentBalanceMinor = currentBalanceMinor,
+            )
         }
 
         item {
@@ -419,7 +424,10 @@ internal fun AccountDetailScreen(
 }
 
 @Composable
-private fun AccountSummaryCard(account: Account) {
+private fun AccountSummaryCard(
+    account: Account,
+    currentBalanceMinor: Long,
+) {
     Card {
         Column(
             modifier = Modifier
@@ -438,9 +446,18 @@ private fun AccountSummaryCard(account: Account) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
-                text = formatMoney(account.openingBalanceMinor, account.currencyCode),
+                text = formatMoney(currentBalanceMinor, account.currencyCode),
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Medium,
+            )
+            Text(
+                text = if (account.sourceType == AccountSourceType.API_SYNC && account.type == AccountType.INVESTMENT) {
+                    "Current synced portfolio value"
+                } else {
+                    "Current balance from opening balance plus tracked transactions"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
                 text = when (account.sourceType) {

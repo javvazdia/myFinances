@@ -6,6 +6,7 @@ import com.myfinances.app.domain.model.Account
 import com.myfinances.app.domain.model.AccountSourceType
 import com.myfinances.app.domain.model.AccountType
 import com.myfinances.app.domain.model.InvestmentPosition
+import com.myfinances.app.domain.model.calculateAccountCurrentBalances
 import com.myfinances.app.domain.repository.LedgerRepository
 import com.myfinances.app.presentation.shared.formatMinorMoney
 import com.myfinances.app.presentation.shared.formatTimestampLabel
@@ -13,6 +14,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -21,6 +23,7 @@ import kotlin.time.Clock
 
 data class AccountsUiState(
     val accounts: List<Account> = emptyList(),
+    val currentBalancesByAccountId: Map<String, Long> = emptyMap(),
     val selectedAccountId: String? = null,
     val selectedInvestmentPositions: List<InvestmentPosition> = emptyList(),
     val draftName: String = "",
@@ -37,6 +40,9 @@ data class AccountsUiState(
     val selectedAccount: Account?
         get() = accounts.firstOrNull { account -> account.id == selectedAccountId }
 
+    val selectedAccountCurrentBalanceMinor: Long?
+        get() = selectedAccount?.let { account -> currentBalanceMinorFor(account.id) }
+
     val editingAccount: Account?
         get() = accounts.firstOrNull { account -> account.id == editingAccountId }
 
@@ -50,6 +56,12 @@ data class AccountsUiState(
 
     val isBusy: Boolean
         get() = isSaving || pendingDeleteAccountId != null
+
+    fun currentBalanceMinorFor(accountId: String): Long =
+        currentBalancesByAccountId[accountId] ?: accounts
+            .firstOrNull { account -> account.id == accountId }
+            ?.openingBalanceMinor
+            ?: 0L
 }
 
 class AccountsViewModel(
@@ -61,10 +73,21 @@ class AccountsViewModel(
 
     init {
         viewModelScope.launch {
-            ledgerRepository.observeAccounts().collect { accounts ->
+            combine(
+                ledgerRepository.observeAccounts(),
+                ledgerRepository.observeAllTransactions(),
+            ) { accounts, transactions ->
+                accounts to transactions
+            }.collect { (accounts, transactions) ->
+                val currentBalances = calculateAccountCurrentBalances(
+                    accounts = accounts,
+                    transactions = transactions,
+                )
+
                 _uiState.update { currentState ->
                     currentState.copy(
                         accounts = accounts,
+                        currentBalancesByAccountId = currentBalances,
                         selectedAccountId = currentState.selectedAccountId
                             ?.takeIf { selectedId -> accounts.any { account -> account.id == selectedId } },
                         editingAccountId = currentState.editingAccountId

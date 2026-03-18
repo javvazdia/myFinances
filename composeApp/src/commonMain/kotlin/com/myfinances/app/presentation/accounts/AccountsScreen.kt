@@ -42,6 +42,8 @@ fun AccountsScreen(
     if (selectedAccount != null) {
         AccountDetailScreen(
             account = selectedAccount,
+            currentBalanceMinor = uiState.selectedAccountCurrentBalanceMinor
+                ?: selectedAccount.openingBalanceMinor,
             positions = uiState.selectedInvestmentPositions,
             onBack = onCloseAccountDetails,
             onEditAccount = onEditAccount,
@@ -129,6 +131,7 @@ fun AccountsScreen(
                 ) { account ->
                     AccountCard(
                         account = account,
+                        currentBalanceMinor = uiState.currentBalanceMinorFor(account.id),
                         onSelectAccount = onSelectAccount,
                         onEditAccount = onEditAccount,
                         onRequestDeleteAccount = onRequestDeleteAccount,

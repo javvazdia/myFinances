@@ -7,6 +7,7 @@ import com.myfinances.app.domain.model.FinanceTransaction
 import com.myfinances.app.domain.model.OverviewSnapshot
 import com.myfinances.app.domain.model.RecentTransaction
 import com.myfinances.app.domain.model.TransactionType
+import com.myfinances.app.domain.model.calculateAccountCurrentBalances
 import com.myfinances.app.domain.repository.FinanceRepository
 import com.myfinances.app.domain.repository.LedgerRepository
 import kotlinx.coroutines.flow.Flow
@@ -26,7 +27,10 @@ class DefaultFinanceRepository(
         ledgerRepository.observeRecentTransactions(limit = 5),
     ) { accounts, categories, allTransactions, recentTransactions ->
         val categoryNames = categories.associateBy(Category::id)
-        val totalBalanceMinor = calculateTotalBalance(accounts, allTransactions)
+        val totalBalanceMinor = calculateAccountCurrentBalances(
+            accounts = accounts,
+            transactions = allTransactions,
+        ).values.sum()
         val monthlyIncomeMinor = allTransactions
             .filter { it.type == TransactionType.INCOME && isInCurrentMonth(it.postedAtEpochMs) }
             .sumOf { it.amountMinor }
@@ -57,23 +61,6 @@ class DefaultFinanceRepository(
                 )
             },
         )
-    }
-
-    private fun calculateTotalBalance(
-        accounts: List<Account>,
-        allTransactions: List<FinanceTransaction>,
-    ): Long {
-        val openingBalances = accounts.sumOf(Account::openingBalanceMinor)
-        val netTransactions = allTransactions.sumOf { transaction ->
-            when (transaction.type) {
-                TransactionType.INCOME -> transaction.amountMinor
-                TransactionType.EXPENSE -> -transaction.amountMinor
-                TransactionType.TRANSFER -> 0L
-                TransactionType.ADJUSTMENT -> transaction.amountMinor
-            }
-        }
-
-        return openingBalances + netTransactions
     }
 
     private fun buildFocusMessage(
