@@ -78,6 +78,7 @@ class StubIndexaIntegrationServiceTest {
 
         val importedAccounts = ledgerRepository.observeAccounts(includeArchived = true).first()
         val importedTransactions = ledgerRepository.observeAllTransactions().first()
+        val importedCategories = ledgerRepository.observeCategories().first()
         val updatedConnection = connectionsRepository.observeConnections().first().first()
         val links = connectionsRepository.observeAccountLinks(connection.id).first()
 
@@ -87,10 +88,12 @@ class StubIndexaIntegrationServiceTest {
         assertEquals(1, syncRun.importedPositions)
         assertEquals(1, importedAccounts.size)
         assertEquals(1, importedTransactions.size)
+        assertTrue(importedCategories.any { category -> category.name == "Investment fees" })
         assertEquals("Indexa Capital", importedAccounts.first().sourceProvider)
         assertEquals("cash-demo-1", importedTransactions.first().externalTransactionId)
         assertEquals(TransactionType.EXPENSE, importedTransactions.first().type)
         assertEquals(300L, importedTransactions.first().amountMinor)
+        assertEquals("cat-expense-indexa-investment-fees", importedTransactions.first().categoryId)
         assertEquals(ExternalSyncStatus.SUCCESS, updatedConnection.lastSyncStatus)
         assertTrue(links.first().localAccountId != null)
     }
@@ -110,20 +113,29 @@ class StubIndexaIntegrationServiceTest {
         val connection = service.connect("demo-token")
 
         val syncRun = service.runSync(connection.id)
+        val importedCategories = ledgerRepository.observeCategories().first()
         val importedTransactions = ledgerRepository.observeAllTransactions().first()
 
-        assertEquals(2, syncRun.importedTransactions)
-        assertEquals(2, importedTransactions.size)
-        assertEquals(TransactionType.TRANSFER, importedTransactions.first().type)
-        assertEquals(-2500L, importedTransactions.first().amountMinor)
-        assertEquals(TransactionType.EXPENSE, importedTransactions.last().type)
-        assertEquals(200L, importedTransactions.last().amountMinor)
+        assertEquals(3, syncRun.importedTransactions)
+        assertEquals(3, importedTransactions.size)
+        assertTrue(importedCategories.any { category -> category.name == "Investment contribution" })
+        assertTrue(importedCategories.any { category -> category.name == "Investment fees" })
+        assertEquals(TransactionType.TRANSFER, importedTransactions[0].type)
+        assertEquals(-2500L, importedTransactions[0].amountMinor)
+        assertEquals("cat-transfer-indexa-investment-contribution", importedTransactions[0].categoryId)
+        assertEquals(TransactionType.TRANSFER, importedTransactions[1].type)
+        assertEquals(15000L, importedTransactions[1].amountMinor)
+        assertEquals("cat-transfer-indexa-transfer", importedTransactions[1].categoryId)
+        assertEquals(TransactionType.EXPENSE, importedTransactions[2].type)
+        assertEquals(200L, importedTransactions[2].amountMinor)
+        assertEquals("cat-expense-indexa-investment-fees", importedTransactions[2].categoryId)
     }
 }
 
 private class FakeLedgerRepository : LedgerRepository {
     private val accounts = MutableStateFlow<List<Account>>(emptyList())
     private val positionsByAccount = mutableMapOf<String, MutableStateFlow<List<InvestmentPosition>>>()
+    private val categories = MutableStateFlow<List<Category>>(emptyList())
     private val transactions = MutableStateFlow<List<FinanceTransaction>>(emptyList())
 
     override fun observeAccounts(includeArchived: Boolean): Flow<List<Account>> = accounts
@@ -131,9 +143,10 @@ private class FakeLedgerRepository : LedgerRepository {
     override fun observeInvestmentPositions(accountId: String): Flow<List<InvestmentPosition>> =
         positionsByAccount.getOrPut(accountId) { MutableStateFlow(emptyList()) }
 
-    override fun observeCategories(): Flow<List<Category>> = MutableStateFlow(emptyList())
+    override fun observeCategories(): Flow<List<Category>> = categories
 
-    override fun observeCategories(kind: CategoryKind): Flow<List<Category>> = MutableStateFlow(emptyList())
+    override fun observeCategories(kind: CategoryKind): Flow<List<Category>> =
+        MutableStateFlow(categories.value.filter { category -> category.kind == kind })
 
     override fun observeRecentTransactions(limit: Int): Flow<List<FinanceTransaction>> =
         MutableStateFlow(transactions.value.take(limit))
@@ -156,7 +169,12 @@ private class FakeLedgerRepository : LedgerRepository {
         positionsByAccount.getOrPut(accountId) { MutableStateFlow(emptyList()) }.value = positions
     }
 
-    override suspend fun upsertCategory(category: Category) = Unit
+    override suspend fun upsertCategory(category: Category) {
+        categories.value = categories.value
+            .filterNot { existing -> existing.id == category.id }
+            .plus(category)
+            .sortedBy(Category::name)
+    }
 
     override suspend fun upsertTransaction(transaction: FinanceTransaction) {
         transactions.value = transactions.value
@@ -219,13 +237,24 @@ private class TransferHeavyIndexaApiClient : IndexaApiClient {
         IndexaCashTransaction(
             reference = "cash-transfer-1",
             accountNumber = accountNumber,
-            date = "2026-03-03",
+            date = "2026-03-04",
             amount = -25.0,
             currencyCode = "EUR",
             fees = 0.0,
             operationCode = 101,
-            operationType = "TRASPASO DE EFECTIVO",
-            comments = "Internal cash movement",
+            operationType = "SUSCRIPCION FONDOS INVERSION SF",
+            comments = "Monthly contribution",
+        ),
+        IndexaCashTransaction(
+            reference = "cash-transfer-2",
+            accountNumber = accountNumber,
+            date = "2026-03-03",
+            amount = 150.0,
+            currencyCode = "EUR",
+            fees = 0.0,
+            operationCode = 103,
+            operationType = "TRANSFERENCIA SEPA",
+            comments = "Cash transfer",
         ),
         IndexaCashTransaction(
             reference = "cash-fee-1",

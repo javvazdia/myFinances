@@ -55,9 +55,12 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 import kotlinx.coroutines.launch
 import kotlin.random.Random
 import kotlin.time.Clock
+import kotlin.time.Instant
 
 @Composable
 fun TransactionsRoute(
@@ -909,7 +912,7 @@ private fun FinanceTransaction.toCardUiModel(
         accountName = accountName,
         categoryName = categoryName,
         amountLabel = buildSignedAmountLabel(amountMinor, currencyCode, isExpense),
-        dateLabel = "Today",
+        dateLabel = formatTransactionDateLabel(postedAtEpochMs),
         isExpense = isExpense,
     )
 }
@@ -969,6 +972,30 @@ internal fun formatTransactionMoney(amountMinor: Long, currencyCode: String): St
     val major = absoluteAmount / 100
     val minor = absoluteAmount % 100
     return "$major.${minor.toString().padStart(2, '0')} $currencyCode"
+}
+
+internal fun formatTransactionDateLabel(
+    epochMs: Long,
+    nowEpochMs: Long = Clock.System.now().toEpochMilliseconds(),
+): String {
+    val timeZone = TimeZone.currentSystemDefault()
+    val currentDate = Instant
+        .fromEpochMilliseconds(nowEpochMs)
+        .toLocalDateTime(timeZone)
+        .date
+    val transactionDate = Instant
+        .fromEpochMilliseconds(epochMs)
+        .toLocalDateTime(timeZone)
+        .date
+
+    if (currentDate == transactionDate) return "Today"
+
+    val month = transactionDate.month.name
+        .lowercase()
+        .replaceFirstChar { character -> character.uppercase() }
+        .take(3)
+
+    return "$month ${transactionDate.day}"
 }
 
 private fun TransactionsUiState.toCreateMode(): TransactionsUiState =

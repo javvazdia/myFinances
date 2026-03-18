@@ -30,6 +30,15 @@ class TransactionsScreenTest {
     }
 
     @Test
+    fun formatsTransactionDateFromPostedTimestamp() {
+        val marchTenth2026 = 1_773_100_800_000L
+        val marchEighteenth2026 = 1_773_792_000_000L
+
+        assertEquals("Mar 10", formatTransactionDateLabel(marchTenth2026, nowEpochMs = marchEighteenth2026))
+        assertEquals("Today", formatTransactionDateLabel(marchEighteenth2026, nowEpochMs = marchEighteenth2026))
+    }
+
+    @Test
     fun exposesDeleteConfirmationTitleFromSelectedTransaction() {
         val uiState = TransactionsUiState(
             recentTransactions = listOf(
