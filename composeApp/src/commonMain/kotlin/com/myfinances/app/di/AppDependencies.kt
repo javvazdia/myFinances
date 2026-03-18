@@ -33,6 +33,7 @@ fun buildAppDependencies(
     val indexaApiClient: IndexaApiClient = KtorIndexaApiClient()
     val indexaIntegrationService = StubIndexaIntegrationService(
         apiClient = indexaApiClient,
+        ledgerRepository = ledgerRepository,
         externalConnectionsRepository = externalConnectionsRepository,
         connectionSecretStore = connectionSecretStore,
     )

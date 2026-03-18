@@ -79,6 +79,7 @@ fun SettingsRoute(
         onIndexaTokenChange = settingsViewModel::onIndexaTokenChange,
         onTestIndexaConnection = settingsViewModel::testIndexaConnection,
         onConnectIndexa = settingsViewModel::connectIndexa,
+        onRunIndexaSync = settingsViewModel::runIndexaSync,
         onNameChange = settingsViewModel::onNameChange,
         onKindSelected = settingsViewModel::onKindSelected,
         onSaveCategory = settingsViewModel::saveCategory,
@@ -96,6 +97,7 @@ fun SettingsScreen(
     onIndexaTokenChange: (String) -> Unit,
     onTestIndexaConnection: () -> Unit,
     onConnectIndexa: () -> Unit,
+    onRunIndexaSync: () -> Unit,
     onNameChange: (String) -> Unit,
     onKindSelected: (CategoryKind) -> Unit,
     onSaveCategory: () -> Unit,
@@ -141,6 +143,7 @@ fun SettingsScreen(
                 onIndexaTokenChange = onIndexaTokenChange,
                 onTestIndexaConnection = onTestIndexaConnection,
                 onConnectIndexa = onConnectIndexa,
+                onRunIndexaSync = onRunIndexaSync,
             )
         }
 
@@ -240,6 +243,7 @@ private fun ConnectionsOverviewCard(
     onIndexaTokenChange: (String) -> Unit,
     onTestIndexaConnection: () -> Unit,
     onConnectIndexa: () -> Unit,
+    onRunIndexaSync: () -> Unit,
 ) {
     Card {
         Column(
@@ -275,6 +279,7 @@ private fun ConnectionsOverviewCard(
                 onIndexaTokenChange = onIndexaTokenChange,
                 onTestIndexaConnection = onTestIndexaConnection,
                 onConnectIndexa = onConnectIndexa,
+                onRunIndexaSync = onRunIndexaSync,
             )
         }
     }
@@ -286,7 +291,12 @@ private fun IndexaSetupCard(
     onIndexaTokenChange: (String) -> Unit,
     onTestIndexaConnection: () -> Unit,
     onConnectIndexa: () -> Unit,
+    onRunIndexaSync: () -> Unit,
 ) {
+    val indexaConnection = uiState.connections.firstOrNull { connection ->
+        connection.providerId == com.myfinances.app.domain.model.integration.ExternalProviderId.INDEXA
+    }
+
     Card(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
@@ -317,13 +327,13 @@ private fun IndexaSetupCard(
                 label = { Text("Indexa API token") },
                 supportingText = { Text("Start with a personal read-only token from your Indexa account settings.") },
                 singleLine = true,
-                enabled = !uiState.isTestingIndexa && !uiState.isConnectingIndexa,
+                enabled = !uiState.isTestingIndexa && !uiState.isConnectingIndexa && !uiState.isSyncingIndexa,
             )
 
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Button(
                     onClick = onTestIndexaConnection,
-                    enabled = !uiState.isTestingIndexa && !uiState.isConnectingIndexa,
+                    enabled = !uiState.isTestingIndexa && !uiState.isConnectingIndexa && !uiState.isSyncingIndexa,
                 ) {
                     Text(if (uiState.isTestingIndexa) "Testing..." else "Test connection")
                 }
@@ -332,9 +342,21 @@ private fun IndexaSetupCard(
                     onClick = onConnectIndexa,
                     enabled = !uiState.isTestingIndexa &&
                         !uiState.isConnectingIndexa &&
+                        !uiState.isSyncingIndexa &&
                         uiState.draftIndexaToken.isNotBlank(),
                 ) {
                     Text(if (uiState.isConnectingIndexa) "Connecting..." else "Save connection")
+                }
+
+                if (indexaConnection != null) {
+                    Button(
+                        onClick = onRunIndexaSync,
+                        enabled = !uiState.isTestingIndexa &&
+                            !uiState.isConnectingIndexa &&
+                            !uiState.isSyncingIndexa,
+                    ) {
+                        Text(if (uiState.isSyncingIndexa) "Syncing..." else "Sync now")
+                    }
                 }
             }
 
@@ -666,6 +688,7 @@ data class SettingsUiState(
     val indexaPreview: IndexaConnectionPreview? = null,
     val isTestingIndexa: Boolean = false,
     val isConnectingIndexa: Boolean = false,
+    val isSyncingIndexa: Boolean = false,
     val indexaConnectionMessage: String? = null,
     val indexaConnectionError: String? = null,
     val draftName: String = "",
@@ -822,7 +845,7 @@ class SettingsViewModel(
                     currentState.copy(
                         draftIndexaToken = "",
                         isConnectingIndexa = false,
-                        indexaConnectionMessage = "Saved ${connection.displayName}. The next step is wiring live import and sync into those discovered Indexa accounts.",
+                        indexaConnectionMessage = "Saved ${connection.displayName}. Run Sync now to import those discovered Indexa accounts into the local ledger.",
                         indexaConnectionError = null,
                     )
                 }
@@ -832,6 +855,53 @@ class SettingsViewModel(
                         isConnectingIndexa = false,
                         indexaConnectionMessage = null,
                         indexaConnectionError = throwable.message ?: "Indexa connection setup failed.",
+                    )
+                }
+            }
+        }
+    }
+
+    fun runIndexaSync() {
+        val connectionId = uiState.value.connections.firstOrNull { connection ->
+            connection.providerId == com.myfinances.app.domain.model.integration.ExternalProviderId.INDEXA
+        }?.id
+
+        if (connectionId == null) {
+            _uiState.update { currentState ->
+                currentState.copy(
+                    indexaConnectionError = "Save the Indexa connection before running sync.",
+                    indexaConnectionMessage = null,
+                )
+            }
+            return
+        }
+
+        viewModelScope.launch {
+            _uiState.update { currentState ->
+                currentState.copy(
+                    isSyncingIndexa = true,
+                    indexaConnectionError = null,
+                    indexaConnectionMessage = null,
+                )
+            }
+
+            runCatching {
+                indexaIntegrationService.runSync(connectionId)
+            }.onSuccess { syncRun ->
+                _uiState.update { currentState ->
+                    currentState.copy(
+                        isSyncingIndexa = false,
+                        indexaConnectionMessage = syncRun.message
+                            ?: "Indexa sync completed successfully.",
+                        indexaConnectionError = null,
+                    )
+                }
+            }.onFailure { throwable ->
+                _uiState.update { currentState ->
+                    currentState.copy(
+                        isSyncingIndexa = false,
+                        indexaConnectionMessage = null,
+                        indexaConnectionError = throwable.message ?: "Indexa sync failed.",
                     )
                 }
             }
@@ -1075,7 +1145,7 @@ private fun buildConnectionStatusMessage(
 
     return when (connection.lastSyncStatus) {
         ExternalSyncStatus.SUCCESS ->
-            "Last sync succeeded. The next step is to surface imported accounts, holdings, and sync history in the UI."
+            "Last sync succeeded. Imported accounts should now be available in the Accounts tab."
         ExternalSyncStatus.FAILED ->
             connection.lastErrorMessage ?: "The last sync failed and needs attention."
         ExternalSyncStatus.PARTIAL ->
