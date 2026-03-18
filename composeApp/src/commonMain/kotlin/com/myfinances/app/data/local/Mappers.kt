@@ -2,10 +2,16 @@ package com.myfinances.app.data.local
 
 import com.myfinances.app.data.local.entity.AccountEntity
 import com.myfinances.app.data.local.entity.CategoryEntity
+import com.myfinances.app.data.local.entity.ExternalAccountLinkEntity
+import com.myfinances.app.data.local.entity.ExternalConnectionEntity
+import com.myfinances.app.data.local.entity.ExternalSyncRunEntity
 import com.myfinances.app.data.local.entity.TransactionEntity
 import com.myfinances.app.domain.model.Account
 import com.myfinances.app.domain.model.Category
 import com.myfinances.app.domain.model.FinanceTransaction
+import com.myfinances.app.domain.model.integration.ExternalAccountLink
+import com.myfinances.app.domain.model.integration.ExternalConnection
+import com.myfinances.app.domain.model.integration.ExternalSyncRun
 
 object AccountEntityMapper {
     fun toDomain(entity: AccountEntity): Account = Account(
@@ -94,5 +100,85 @@ object TransactionEntityMapper {
         postedAtEpochMs = model.postedAtEpochMs,
         createdAtEpochMs = model.createdAtEpochMs,
         updatedAtEpochMs = model.updatedAtEpochMs,
+    )
+}
+
+object ExternalConnectionEntityMapper {
+    fun toDomain(entity: ExternalConnectionEntity): ExternalConnection = ExternalConnection(
+        id = entity.id,
+        providerId = entity.providerId,
+        displayName = entity.displayName,
+        status = entity.status,
+        externalUserId = entity.externalUserId,
+        lastSuccessfulSyncEpochMs = entity.lastSuccessfulSyncEpochMs,
+        lastSyncAttemptEpochMs = entity.lastSyncAttemptEpochMs,
+        lastSyncStatus = entity.lastSyncStatus,
+        lastErrorMessage = entity.lastErrorMessage,
+        createdAtEpochMs = entity.createdAtEpochMs,
+        updatedAtEpochMs = entity.updatedAtEpochMs,
+    )
+
+    fun toEntity(model: ExternalConnection): ExternalConnectionEntity = ExternalConnectionEntity(
+        id = model.id,
+        providerId = model.providerId,
+        displayName = model.displayName,
+        status = model.status,
+        externalUserId = model.externalUserId,
+        lastSuccessfulSyncEpochMs = model.lastSuccessfulSyncEpochMs,
+        lastSyncAttemptEpochMs = model.lastSyncAttemptEpochMs,
+        lastSyncStatus = model.lastSyncStatus,
+        lastErrorMessage = model.lastErrorMessage,
+        createdAtEpochMs = model.createdAtEpochMs,
+        updatedAtEpochMs = model.updatedAtEpochMs,
+    )
+}
+
+object ExternalAccountLinkEntityMapper {
+    fun toDomain(entity: ExternalAccountLinkEntity): ExternalAccountLink = ExternalAccountLink(
+        connectionId = entity.connectionId,
+        providerAccountId = entity.providerAccountId,
+        localAccountId = entity.localAccountId,
+        accountDisplayName = entity.accountDisplayName,
+        accountTypeLabel = entity.accountTypeLabel,
+        currencyCode = entity.currencyCode,
+        lastImportedAtEpochMs = entity.lastImportedAtEpochMs,
+    )
+
+    fun toEntity(model: ExternalAccountLink): ExternalAccountLinkEntity = ExternalAccountLinkEntity(
+        connectionId = model.connectionId,
+        providerAccountId = model.providerAccountId,
+        localAccountId = model.localAccountId,
+        accountDisplayName = model.accountDisplayName,
+        accountTypeLabel = model.accountTypeLabel,
+        currencyCode = model.currencyCode,
+        lastImportedAtEpochMs = model.lastImportedAtEpochMs,
+    )
+}
+
+object ExternalSyncRunEntityMapper {
+    fun toDomain(entity: ExternalSyncRunEntity): ExternalSyncRun = ExternalSyncRun(
+        id = entity.id,
+        connectionId = entity.connectionId,
+        providerId = entity.providerId,
+        startedAtEpochMs = entity.startedAtEpochMs,
+        finishedAtEpochMs = entity.finishedAtEpochMs,
+        status = entity.status,
+        importedAccounts = entity.importedAccounts,
+        importedTransactions = entity.importedTransactions,
+        importedPositions = entity.importedPositions,
+        message = entity.message,
+    )
+
+    fun toEntity(model: ExternalSyncRun): ExternalSyncRunEntity = ExternalSyncRunEntity(
+        id = model.id,
+        connectionId = model.connectionId,
+        providerId = model.providerId,
+        startedAtEpochMs = model.startedAtEpochMs,
+        finishedAtEpochMs = model.finishedAtEpochMs,
+        status = model.status,
+        importedAccounts = model.importedAccounts,
+        importedTransactions = model.importedTransactions,
+        importedPositions = model.importedPositions,
+        message = model.message,
     )
 }

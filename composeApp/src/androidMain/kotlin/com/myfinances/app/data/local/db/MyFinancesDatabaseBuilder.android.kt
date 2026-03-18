@@ -15,9 +15,9 @@ fun getMyFinancesDatabaseBuilder(
     return Room.databaseBuilder<MyFinancesDatabase>(
         context = appContext,
         name = databaseFile.absolutePath,
-    ).setDriver(BundledSQLiteDriver())
+    ).addMigrations(MIGRATION_1_TO_2)
+        .setDriver(BundledSQLiteDriver())
 }
 
 fun createMyFinancesDatabase(context: Context): MyFinancesDatabase =
     getMyFinancesDatabaseBuilder(context).build()
-

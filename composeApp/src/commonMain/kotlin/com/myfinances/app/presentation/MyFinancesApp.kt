@@ -91,6 +91,7 @@ fun MyFinancesApp(appDependencies: AppDependencies) {
                 SettingsRoute(
                     ledgerRepository = appDependencies.ledgerRepository,
                     externalConnectionsRepository = appDependencies.externalConnectionsRepository,
+                    indexaIntegrationService = appDependencies.indexaIntegrationService,
                 )
             }
         }

@@ -48,6 +48,8 @@ import com.myfinances.app.domain.model.integration.ExternalProviderDefinition
 import com.myfinances.app.domain.model.integration.ExternalSyncStatus
 import com.myfinances.app.domain.repository.ExternalConnectionsRepository
 import com.myfinances.app.domain.repository.LedgerRepository
+import com.myfinances.app.integrations.indexa.model.IndexaConnectionPreview
+import com.myfinances.app.integrations.indexa.sync.IndexaIntegrationService
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -62,16 +64,21 @@ import kotlin.time.Clock
 fun SettingsRoute(
     ledgerRepository: LedgerRepository,
     externalConnectionsRepository: ExternalConnectionsRepository,
+    indexaIntegrationService: IndexaIntegrationService,
     settingsViewModel: SettingsViewModel = viewModel {
         SettingsViewModel(
             ledgerRepository = ledgerRepository,
             externalConnectionsRepository = externalConnectionsRepository,
+            indexaIntegrationService = indexaIntegrationService,
         )
     },
 ) {
     val uiState by settingsViewModel.uiState.collectAsState()
     SettingsScreen(
         uiState = uiState,
+        onIndexaTokenChange = settingsViewModel::onIndexaTokenChange,
+        onTestIndexaConnection = settingsViewModel::testIndexaConnection,
+        onConnectIndexa = settingsViewModel::connectIndexa,
         onNameChange = settingsViewModel::onNameChange,
         onKindSelected = settingsViewModel::onKindSelected,
         onSaveCategory = settingsViewModel::saveCategory,
@@ -86,6 +93,9 @@ fun SettingsRoute(
 @Composable
 fun SettingsScreen(
     uiState: SettingsUiState,
+    onIndexaTokenChange: (String) -> Unit,
+    onTestIndexaConnection: () -> Unit,
+    onConnectIndexa: () -> Unit,
     onNameChange: (String) -> Unit,
     onKindSelected: (CategoryKind) -> Unit,
     onSaveCategory: () -> Unit,
@@ -126,7 +136,12 @@ fun SettingsScreen(
         }
 
         item {
-            ConnectionsOverviewCard(uiState = uiState)
+            ConnectionsOverviewCard(
+                uiState = uiState,
+                onIndexaTokenChange = onIndexaTokenChange,
+                onTestIndexaConnection = onTestIndexaConnection,
+                onConnectIndexa = onConnectIndexa,
+            )
         }
 
         item {
@@ -220,7 +235,12 @@ fun SettingsScreen(
 }
 
 @Composable
-private fun ConnectionsOverviewCard(uiState: SettingsUiState) {
+private fun ConnectionsOverviewCard(
+    uiState: SettingsUiState,
+    onIndexaTokenChange: (String) -> Unit,
+    onTestIndexaConnection: () -> Unit,
+    onConnectIndexa: () -> Unit,
+) {
     Card {
         Column(
             modifier = Modifier
@@ -248,6 +268,145 @@ private fun ConnectionsOverviewCard(uiState: SettingsUiState) {
                     provider = provider,
                     connection = connection,
                 )
+            }
+
+            IndexaSetupCard(
+                uiState = uiState,
+                onIndexaTokenChange = onIndexaTokenChange,
+                onTestIndexaConnection = onTestIndexaConnection,
+                onConnectIndexa = onConnectIndexa,
+            )
+        }
+    }
+}
+
+@Composable
+private fun IndexaSetupCard(
+    uiState: SettingsUiState,
+    onIndexaTokenChange: (String) -> Unit,
+    onTestIndexaConnection: () -> Unit,
+    onConnectIndexa: () -> Unit,
+) {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
+        ),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = "Indexa setup",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+
+            Text(
+                text = "Paste your read-only Indexa API token, test the connection, and then save the local connection. This token is kept behind the secret-store abstraction, not in the ledger database.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            OutlinedTextField(
+                value = uiState.draftIndexaToken,
+                onValueChange = onIndexaTokenChange,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Indexa API token") },
+                supportingText = { Text("Start with a personal read-only token from your Indexa account settings.") },
+                singleLine = true,
+                enabled = !uiState.isTestingIndexa && !uiState.isConnectingIndexa,
+            )
+
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Button(
+                    onClick = onTestIndexaConnection,
+                    enabled = !uiState.isTestingIndexa && !uiState.isConnectingIndexa,
+                ) {
+                    Text(if (uiState.isTestingIndexa) "Testing..." else "Test connection")
+                }
+
+                Button(
+                    onClick = onConnectIndexa,
+                    enabled = !uiState.isTestingIndexa &&
+                        !uiState.isConnectingIndexa &&
+                        uiState.draftIndexaToken.isNotBlank(),
+                ) {
+                    Text(if (uiState.isConnectingIndexa) "Connecting..." else "Save connection")
+                }
+            }
+
+            if (uiState.indexaConnectionMessage != null) {
+                Text(
+                    text = uiState.indexaConnectionMessage,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+
+            if (uiState.indexaConnectionError != null) {
+                Text(
+                    text = uiState.indexaConnectionError,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+
+            if (uiState.indexaPreview != null) {
+                IndexaPreviewSection(preview = uiState.indexaPreview)
+            }
+        }
+    }
+}
+
+@Composable
+private fun IndexaPreviewSection(preview: IndexaConnectionPreview) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            text = "Connection preview",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+        )
+
+        Text(
+            text = "Suggested name: ${preview.suggestedConnectionName}",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Text(
+            text = "Detected account owner: ${preview.profile.fullName ?: preview.profile.email}",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+
+        preview.profile.accounts.forEach { account ->
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                ),
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        text = account.displayName,
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    Text(
+                        text = "Account: ${account.accountNumber}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        text = buildPreviewAccountSubtitle(account),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
     }
@@ -503,6 +662,12 @@ private fun CategoryCard(
 data class SettingsUiState(
     val connections: List<ExternalConnection> = emptyList(),
     val categories: List<Category> = emptyList(),
+    val draftIndexaToken: String = "",
+    val indexaPreview: IndexaConnectionPreview? = null,
+    val isTestingIndexa: Boolean = false,
+    val isConnectingIndexa: Boolean = false,
+    val indexaConnectionMessage: String? = null,
+    val indexaConnectionError: String? = null,
     val draftName: String = "",
     val selectedKind: CategoryKind = CategoryKind.EXPENSE,
     val editingCategoryId: String? = null,
@@ -529,6 +694,7 @@ data class SettingsUiState(
 class SettingsViewModel(
     private val ledgerRepository: LedgerRepository,
     private val externalConnectionsRepository: ExternalConnectionsRepository,
+    private val indexaIntegrationService: IndexaIntegrationService,
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(SettingsUiState())
     val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()
@@ -569,6 +735,106 @@ class SettingsViewModel(
                 draftName = value,
                 errorMessage = null,
             )
+        }
+    }
+
+    fun onIndexaTokenChange(value: String) {
+        _uiState.update { currentState ->
+            currentState.copy(
+                draftIndexaToken = value,
+                indexaPreview = null,
+                indexaConnectionMessage = null,
+                indexaConnectionError = null,
+            )
+        }
+    }
+
+    fun testIndexaConnection() {
+        val token = uiState.value.draftIndexaToken.trim()
+        if (token.isBlank()) {
+            _uiState.update { currentState ->
+                currentState.copy(
+                    indexaConnectionError = "Paste an Indexa API token first.",
+                    indexaConnectionMessage = null,
+                )
+            }
+            return
+        }
+
+        viewModelScope.launch {
+            _uiState.update { currentState ->
+                currentState.copy(
+                    isTestingIndexa = true,
+                    indexaConnectionError = null,
+                    indexaConnectionMessage = null,
+                )
+            }
+
+            runCatching {
+                indexaIntegrationService.testConnection(token)
+            }.onSuccess { preview ->
+                _uiState.update { currentState ->
+                    currentState.copy(
+                        isTestingIndexa = false,
+                        indexaPreview = preview,
+                        indexaConnectionMessage = "Connection test succeeded. Review the discovered accounts and save the connection when ready.",
+                        indexaConnectionError = null,
+                    )
+                }
+            }.onFailure { throwable ->
+                _uiState.update { currentState ->
+                    currentState.copy(
+                        isTestingIndexa = false,
+                        indexaPreview = null,
+                        indexaConnectionMessage = null,
+                        indexaConnectionError = throwable.message ?: "Indexa connection test failed.",
+                    )
+                }
+            }
+        }
+    }
+
+    fun connectIndexa() {
+        val token = uiState.value.draftIndexaToken.trim()
+        if (token.isBlank()) {
+            _uiState.update { currentState ->
+                currentState.copy(
+                    indexaConnectionError = "Paste an Indexa API token first.",
+                    indexaConnectionMessage = null,
+                )
+            }
+            return
+        }
+
+        viewModelScope.launch {
+            _uiState.update { currentState ->
+                currentState.copy(
+                    isConnectingIndexa = true,
+                    indexaConnectionError = null,
+                    indexaConnectionMessage = null,
+                )
+            }
+
+            runCatching {
+                indexaIntegrationService.connect(token)
+            }.onSuccess { connection ->
+                _uiState.update { currentState ->
+                    currentState.copy(
+                        draftIndexaToken = "",
+                        isConnectingIndexa = false,
+                        indexaConnectionMessage = "Saved ${connection.displayName}. The next step is wiring live import and sync into those discovered Indexa accounts.",
+                        indexaConnectionError = null,
+                    )
+                }
+            }.onFailure { throwable ->
+                _uiState.update { currentState ->
+                    currentState.copy(
+                        isConnectingIndexa = false,
+                        indexaConnectionMessage = null,
+                        indexaConnectionError = throwable.message ?: "Indexa connection setup failed.",
+                    )
+                }
+            }
         }
     }
 
@@ -766,6 +1032,16 @@ private fun SettingsUiState.toCreateMode(): SettingsUiState =
         pendingDeleteCategoryId = null,
         errorMessage = null,
     )
+
+private fun buildPreviewAccountSubtitle(previewAccount: com.myfinances.app.integrations.indexa.model.IndexaAccountSummary): String {
+    val type = previewAccount.productType ?: "unknown type"
+    val currency = previewAccount.currencyCode ?: "unknown currency"
+    val valuation = previewAccount.currentValuation?.let { value ->
+        " | approx. $value $currency"
+    }.orEmpty()
+
+    return "$type | $currency$valuation"
+}
 
 private val ExternalIntegrationStage.label: String
     get() = when (this) {
