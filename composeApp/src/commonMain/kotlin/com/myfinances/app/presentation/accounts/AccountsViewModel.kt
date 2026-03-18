@@ -3,11 +3,18 @@ package com.myfinances.app.presentation.accounts
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.myfinances.app.domain.model.Account
+import com.myfinances.app.domain.model.AccountValuationSnapshot
 import com.myfinances.app.domain.model.AccountSourceType
 import com.myfinances.app.domain.model.AccountType
+import com.myfinances.app.domain.model.FinanceTransaction
 import com.myfinances.app.domain.model.InvestmentPosition
+import com.myfinances.app.domain.model.TransactionType
 import com.myfinances.app.domain.model.calculateAccountCurrentBalances
 import com.myfinances.app.domain.repository.LedgerRepository
+import com.myfinances.app.integrations.indexa.model.IndexaPerformanceHistory
+import com.myfinances.app.integrations.indexa.sync.INDEXA_PROVIDER_NAME
+import com.myfinances.app.integrations.indexa.sync.IndexaIntegrationService
+import com.myfinances.app.logging.AppLogger
 import com.myfinances.app.presentation.shared.formatMinorMoney
 import com.myfinances.app.presentation.shared.formatTimestampLabel
 import kotlinx.coroutines.Job
@@ -18,14 +25,22 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 import kotlin.random.Random
 import kotlin.time.Clock
+import kotlin.time.Instant
 
 data class AccountsUiState(
     val accounts: List<Account> = emptyList(),
     val currentBalancesByAccountId: Map<String, Long> = emptyMap(),
     val selectedAccountId: String? = null,
     val selectedInvestmentPositions: List<InvestmentPosition> = emptyList(),
+    val accountHistoryCharts: Map<AccountHistoryMode, AccountHistoryChart> = emptyMap(),
+    val selectedAccountHistoryMode: AccountHistoryMode = AccountHistoryMode.VALUE,
+    val isLoadingAccountHistory: Boolean = false,
+    val accountHistoryErrorMessage: String? = null,
     val draftName: String = "",
     val selectedType: AccountType = AccountType.CHECKING,
     val draftCurrencyCode: String = "EUR",
@@ -57,6 +72,14 @@ data class AccountsUiState(
     val isBusy: Boolean
         get() = isSaving || pendingDeleteAccountId != null
 
+    val selectedAccountHistoryChart: AccountHistoryChart?
+        get() = accountHistoryCharts[selectedAccountHistoryMode]
+            ?: accountHistoryCharts[AccountHistoryMode.VALUE]
+            ?: accountHistoryCharts.values.firstOrNull()
+
+    val availableAccountHistoryModes: List<AccountHistoryMode>
+        get() = AccountHistoryMode.entries.filter(accountHistoryCharts::containsKey)
+
     fun currentBalanceMinorFor(accountId: String): Long =
         currentBalancesByAccountId[accountId] ?: accounts
             .firstOrNull { account -> account.id == accountId }
@@ -64,12 +87,37 @@ data class AccountsUiState(
             ?: 0L
 }
 
+enum class AccountHistoryMode {
+    VALUE,
+    PERFORMANCE,
+    SNAPSHOTS,
+}
+
+data class AccountHistoryChart(
+    val title: String,
+    val subtitle: String,
+    val points: List<AccountHistoryPoint>,
+    val minimumLabel: String,
+    val maximumLabel: String,
+    val startLabel: String,
+    val endLabel: String,
+)
+
+data class AccountHistoryPoint(
+    val label: String,
+    val value: Double,
+)
+
 class AccountsViewModel(
     private val ledgerRepository: LedgerRepository,
+    private val indexaIntegrationService: IndexaIntegrationService? = null,
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(AccountsUiState())
     val uiState: StateFlow<AccountsUiState> = _uiState.asStateFlow()
     private var selectedPositionsJob: Job? = null
+    private var selectedTransactionsJob: Job? = null
+    private var selectedPerformanceJob: Job? = null
+    private var selectedSnapshotsJob: Job? = null
 
     init {
         viewModelScope.launch {
@@ -102,10 +150,17 @@ class AccountsViewModel(
                 val selectedId = uiState.value.selectedAccountId
                 if (selectedId != null && accounts.none { account -> account.id == selectedId }) {
                     selectedPositionsJob?.cancel()
+                    selectedTransactionsJob?.cancel()
+                    selectedPerformanceJob?.cancel()
+                    selectedSnapshotsJob?.cancel()
                     _uiState.update { currentState ->
                         currentState.copy(
                             selectedAccountId = null,
                             selectedInvestmentPositions = emptyList(),
+                            accountHistoryCharts = emptyMap(),
+                            selectedAccountHistoryMode = AccountHistoryMode.VALUE,
+                            isLoadingAccountHistory = false,
+                            accountHistoryErrorMessage = null,
                         )
                     }
                 }
@@ -171,6 +226,16 @@ class AccountsViewModel(
         }
     }
 
+    fun selectAccountHistoryMode(mode: AccountHistoryMode) {
+        _uiState.update { currentState ->
+            if (currentState.accountHistoryCharts.containsKey(mode)) {
+                currentState.copy(selectedAccountHistoryMode = mode)
+            } else {
+                currentState
+            }
+        }
+    }
+
     fun saveAccount() {
         val snapshot = uiState.value
         val existingAccount = snapshot.editingAccount
@@ -233,9 +298,15 @@ class AccountsViewModel(
         _uiState.update { currentState ->
             currentState.toCreateMode().copy(
                 selectedAccountId = accountId,
+                accountHistoryCharts = emptyMap(),
+                selectedAccountHistoryMode = AccountHistoryMode.VALUE,
+                isLoadingAccountHistory = false,
+                accountHistoryErrorMessage = null,
                 draftCurrencyCode = currentState.draftCurrencyCode,
             )
         }
+
+        val selectedAccount = uiState.value.accounts.firstOrNull { account -> account.id == accountId }
 
         selectedPositionsJob?.cancel()
         selectedPositionsJob = viewModelScope.launch {
@@ -249,15 +320,65 @@ class AccountsViewModel(
                 }
             }
         }
+
+        selectedTransactionsJob?.cancel()
+        selectedPerformanceJob?.cancel()
+        selectedSnapshotsJob?.cancel()
+        selectedSnapshotsJob = viewModelScope.launch {
+            ledgerRepository.observeAccountValuationSnapshots(accountId).collect { snapshots ->
+                val snapshotChart = selectedAccount?.let { account ->
+                    buildSnapshotHistoryChart(account = account, snapshots = snapshots)
+                }
+                AppLogger.debug(
+                    tag = "AccountsHistory",
+                    message = "Rendering snapshot history for $accountId with ${snapshots.size} snapshot(s)",
+                )
+                _uiState.update { currentState ->
+                    if (currentState.selectedAccountId != accountId) {
+                        currentState
+                    } else {
+                        val updatedCharts = currentState.accountHistoryCharts
+                            .toMutableMap()
+                            .apply {
+                                if (snapshotChart == null) {
+                                    remove(AccountHistoryMode.SNAPSHOTS)
+                                } else {
+                                    put(AccountHistoryMode.SNAPSHOTS, snapshotChart)
+                                }
+                            }
+                        currentState.copy(
+                            accountHistoryCharts = updatedCharts,
+                            selectedAccountHistoryMode = currentState.selectedAccountHistoryMode
+                                .takeIf(updatedCharts::containsKey)
+                                ?: updatedCharts.keys.firstOrNull()
+                                ?: AccountHistoryMode.VALUE,
+                        )
+                    }
+                }
+            }
+        }
+        if (selectedAccount != null) {
+            observeAccountHistory(selectedAccount)
+        }
     }
 
     fun closeAccountDetails() {
         selectedPositionsJob?.cancel()
         selectedPositionsJob = null
+        selectedTransactionsJob?.cancel()
+        selectedTransactionsJob = null
+        selectedPerformanceJob?.cancel()
+        selectedPerformanceJob = null
+        selectedSnapshotsJob?.cancel()
+        selectedSnapshotsJob = null
         _uiState.update { currentState ->
             currentState.copy(
                 selectedAccountId = null,
                 selectedInvestmentPositions = emptyList(),
+                accountHistoryCharts = emptyMap(),
+                selectedAccountHistoryMode = AccountHistoryMode.VALUE,
+                isLoadingAccountHistory = false,
+                accountHistoryErrorMessage = null,
             )
         }
     }
@@ -321,6 +442,131 @@ class AccountsViewModel(
                 currentState.toCreateMode().copy(
                     draftCurrencyCode = currentCurrency,
                 )
+            }
+        }
+    }
+
+    private fun observeAccountHistory(account: Account) {
+        if (
+            account.sourceType == AccountSourceType.API_SYNC &&
+            account.sourceProvider == INDEXA_PROVIDER_NAME
+        ) {
+            AppLogger.debug(
+                tag = "AccountsHistory",
+                message = "Attempting Indexa history load for account ${account.id} (${account.name})",
+            )
+            _uiState.update { currentState ->
+                currentState.copy(
+                    isLoadingAccountHistory = true,
+                    accountHistoryErrorMessage = null,
+                    accountHistoryCharts = emptyMap(),
+                    selectedAccountHistoryMode = AccountHistoryMode.VALUE,
+                )
+            }
+
+            selectedPerformanceJob = viewModelScope.launch {
+                val performanceHistory = runCatching {
+                    indexaIntegrationService?.fetchPerformanceHistory(account.id)
+                }.getOrElse { throwable ->
+                    AppLogger.error(
+                        tag = "AccountsHistory",
+                        message = "Indexa history load failed for account ${account.id}: ${throwable.message}",
+                        throwable = throwable,
+                    )
+                    if (uiState.value.selectedAccountId == account.id) {
+                        _uiState.update { currentState ->
+                            currentState.copy(
+                                isLoadingAccountHistory = false,
+                                accountHistoryErrorMessage = throwable.message
+                                    ?: "Indexa performance history could not be loaded.",
+                            )
+                        }
+                    }
+                    null
+                }
+
+                val historyCharts = performanceHistory?.let { history ->
+                    buildIndexaHistoryCharts(
+                        history = history,
+                        currencyCode = account.currencyCode,
+                        currentBalanceMinor = uiState.value.currentBalanceMinorFor(account.id),
+                    )
+                }
+                AppLogger.debug(
+                    tag = "AccountsHistory",
+                    message = "History chart modes for ${account.id}: ${historyCharts?.keys?.joinToString() ?: "none"}",
+                )
+
+                if (historyCharts != null && historyCharts.isNotEmpty() && uiState.value.selectedAccountId == account.id) {
+                    _uiState.update { currentState ->
+                        val updatedCharts = currentState.accountHistoryCharts
+                            .filterKeys { mode -> mode == AccountHistoryMode.SNAPSHOTS }
+                            .toMutableMap()
+                            .apply { putAll(historyCharts) }
+                        currentState.copy(
+                            isLoadingAccountHistory = false,
+                            accountHistoryErrorMessage = null,
+                            accountHistoryCharts = updatedCharts,
+                            selectedAccountHistoryMode = AccountHistoryMode.VALUE
+                                .takeIf(updatedCharts::containsKey)
+                                ?: updatedCharts.keys.first(),
+                        )
+                    }
+                    return@launch
+                }
+
+                if (uiState.value.selectedAccountId == account.id) {
+                    AppLogger.debug(
+                        tag = "AccountsHistory",
+                        message = "Falling back to local account history for ${account.id}",
+                    )
+                    startLocalAccountHistoryObservation(
+                        account = account,
+                        fallbackMessage = "Indexa evolution data is unavailable for this account right now. Showing local imported cash history instead.",
+                    )
+                }
+            }
+
+            return
+        }
+
+        startLocalAccountHistoryObservation(account = account)
+    }
+
+    private fun startLocalAccountHistoryObservation(
+        account: Account,
+        fallbackMessage: String? = null,
+    ) {
+        selectedTransactionsJob?.cancel()
+        selectedTransactionsJob = viewModelScope.launch {
+            ledgerRepository.observeTransactionsForAccount(account.id).collect { transactions ->
+                AppLogger.debug(
+                    tag = "AccountsHistory",
+                    message = "Rendering local history for ${account.id} with ${transactions.size} transaction(s)",
+                )
+                _uiState.update { currentState ->
+                    if (currentState.selectedAccountId != account.id) {
+                        currentState
+                    } else {
+                        val updatedCharts = currentState.accountHistoryCharts
+                            .filterKeys { mode -> mode == AccountHistoryMode.SNAPSHOTS }
+                            .toMutableMap()
+                            .apply {
+                                put(
+                                    AccountHistoryMode.VALUE,
+                                    buildLocalAccountHistoryChart(account, transactions),
+                                )
+                            }
+                        currentState.copy(
+                            accountHistoryCharts = updatedCharts,
+                            selectedAccountHistoryMode = currentState.selectedAccountHistoryMode
+                                .takeIf(updatedCharts::containsKey)
+                                ?: AccountHistoryMode.VALUE,
+                            isLoadingAccountHistory = false,
+                            accountHistoryErrorMessage = fallbackMessage,
+                        )
+                    }
+                }
             }
         }
     }
@@ -411,6 +657,187 @@ internal fun formatAccountAmountInput(amountMinor: Long): String {
     return "$prefix$major.${minor.toString().padStart(2, '0')}"
 }
 
+internal fun buildLocalAccountHistoryChart(
+    account: Account,
+    transactions: List<FinanceTransaction>,
+): AccountHistoryChart {
+    val sortedTransactions = transactions.sortedBy(FinanceTransaction::postedAtEpochMs)
+    val firstTransactionDate = sortedTransactions.firstOrNull()?.postedAtEpochMs
+    val startingPointEpochMs = firstTransactionDate ?: account.createdAtEpochMs
+    var runningBalanceMinor = account.openingBalanceMinor
+    val points = buildList {
+        add(
+            AccountHistoryPoint(
+                label = formatHistoryDate(startingPointEpochMs),
+                value = runningBalanceMinor.toDouble() / 100.0,
+            ),
+        )
+        sortedTransactions.forEach { transaction ->
+            runningBalanceMinor += transaction.balanceDeltaMinor()
+            add(
+                AccountHistoryPoint(
+                    label = formatHistoryDate(transaction.postedAtEpochMs),
+                    value = runningBalanceMinor.toDouble() / 100.0,
+                ),
+            )
+        }
+    }
+
+    return buildAccountHistoryChart(
+        title = "Balance history",
+        subtitle = "Running balance from the opening balance and tracked transactions.",
+        points = points,
+        valueFormatter = { value -> formatMinorMoney((value * 100).toLong(), account.currencyCode) },
+    )
+}
+
+internal fun buildIndexaHistoryCharts(
+    history: IndexaPerformanceHistory,
+    currencyCode: String,
+    currentBalanceMinor: Long,
+): Map<AccountHistoryMode, AccountHistoryChart> {
+    val charts = linkedMapOf<AccountHistoryMode, AccountHistoryChart>()
+
+    val resolvedValueHistory = history.valueHistory
+        .takeIf { valueHistory -> valueHistory.isNotEmpty() }
+        ?: reconstructIndexaValueHistory(
+            normalizedHistory = history.normalizedHistory,
+            currentBalanceMinor = currentBalanceMinor,
+        )
+
+    val valuePoints = resolvedValueHistory
+        .toSortedMap()
+        .map { (date, value) ->
+            AccountHistoryPoint(
+                label = formatIsoDate(date),
+                value = value,
+            )
+        }
+
+    if (valuePoints.isNotEmpty()) {
+        charts[AccountHistoryMode.VALUE] = buildAccountHistoryChart(
+            title = "Indexa account value",
+            subtitle = if (history.valueHistory.isNotEmpty()) {
+                "Historical account value from the Indexa performance endpoint."
+            } else {
+                "Estimated account value reconstructed from Indexa evolution data and the current synced portfolio value."
+            },
+            points = valuePoints,
+            valueFormatter = { value -> formatMinorMoney((value * 100).toLong(), currencyCode) },
+        )
+    }
+
+    val performancePoints = history.normalizedHistory
+        .toSortedMap()
+        .map { (date, value) ->
+            AccountHistoryPoint(
+                label = formatIsoDate(date),
+                value = value * 100.0,
+            )
+        }
+
+    if (performancePoints.isNotEmpty()) {
+        charts[AccountHistoryMode.PERFORMANCE] = buildAccountHistoryChart(
+            title = "Indexa performance history",
+            subtitle = "Normalized evolution from Indexa. A value of 100 means the starting point of the series.",
+            points = performancePoints,
+            valueFormatter = { value -> "${value.toInt()}" },
+        )
+    }
+
+    return charts
+}
+
+internal fun buildSnapshotHistoryChart(
+    account: Account,
+    snapshots: List<AccountValuationSnapshot>,
+): AccountHistoryChart? {
+    val points = snapshots
+        .sortedBy(AccountValuationSnapshot::capturedAtEpochMs)
+        .map { snapshot ->
+            AccountHistoryPoint(
+                label = snapshot.valuationDate?.let(::formatIsoDate)
+                    ?: formatHistoryDate(snapshot.capturedAtEpochMs),
+                value = snapshot.valueMinor.toDouble() / 100.0,
+            )
+        }
+
+    if (points.isEmpty()) return null
+
+    return buildAccountHistoryChart(
+        title = "Snapshot history",
+        subtitle = "Locally stored balance snapshots captured during syncs. Useful even when a provider does not expose full historical data.",
+        points = points,
+        valueFormatter = { value -> formatMinorMoney((value * 100).toLong(), account.currencyCode) },
+    )
+}
+
+private fun reconstructIndexaValueHistory(
+    normalizedHistory: Map<String, Double>,
+    currentBalanceMinor: Long,
+): Map<String, Double> {
+    if (normalizedHistory.isEmpty()) return emptyMap()
+
+    val latestEntry = normalizedHistory.toSortedMap().lastEntry()
+    val latestNormalizedValue = latestEntry.value
+    if (latestNormalizedValue <= 0.0) return emptyMap()
+
+    val currentBalance = currentBalanceMinor.toDouble() / 100.0
+    if (currentBalance <= 0.0) return emptyMap()
+
+    val baseValue = currentBalance / latestNormalizedValue
+    return normalizedHistory.mapValues { (_, normalizedValue) ->
+        baseValue * normalizedValue
+    }
+}
+
+private fun buildAccountHistoryChart(
+    title: String,
+    subtitle: String,
+    points: List<AccountHistoryPoint>,
+    valueFormatter: (Double) -> String,
+): AccountHistoryChart {
+    val values = points.map(AccountHistoryPoint::value)
+    val minimum = values.minOrNull() ?: 0.0
+    val maximum = values.maxOrNull() ?: 0.0
+
+    return AccountHistoryChart(
+        title = title,
+        subtitle = subtitle,
+        points = points,
+        minimumLabel = valueFormatter(minimum),
+        maximumLabel = valueFormatter(maximum),
+        startLabel = points.first().label,
+        endLabel = points.last().label,
+    )
+}
+
+private fun FinanceTransaction.balanceDeltaMinor(): Long = when (type) {
+    TransactionType.INCOME -> amountMinor
+    TransactionType.EXPENSE -> -amountMinor
+    TransactionType.TRANSFER -> 0L
+    TransactionType.ADJUSTMENT -> amountMinor
+}
+
+private fun formatHistoryDate(epochMs: Long): String {
+    val date = Instant.fromEpochMilliseconds(epochMs)
+        .toLocalDateTime(TimeZone.currentSystemDefault())
+        .date
+    return formatLocalDate(date)
+}
+
+private fun formatIsoDate(isoDate: String): String = runCatching {
+    formatLocalDate(LocalDate.parse(isoDate))
+}.getOrDefault(isoDate)
+
+private fun formatLocalDate(date: LocalDate): String {
+    val month = date.month.name
+        .lowercase()
+        .replaceFirstChar { character -> character.uppercase() }
+        .take(3)
+    return "$month ${date.day}"
+}
+
 private fun formatHoldingDecimal(value: Double): String =
     value
         .toString()
@@ -421,6 +848,10 @@ private fun AccountsUiState.toCreateMode(): AccountsUiState =
     copy(
         selectedAccountId = null,
         selectedInvestmentPositions = emptyList(),
+        accountHistoryCharts = emptyMap(),
+        selectedAccountHistoryMode = AccountHistoryMode.VALUE,
+        isLoadingAccountHistory = false,
+        accountHistoryErrorMessage = null,
         draftName = "",
         selectedType = AccountType.CHECKING,
         draftOpeningBalance = "",

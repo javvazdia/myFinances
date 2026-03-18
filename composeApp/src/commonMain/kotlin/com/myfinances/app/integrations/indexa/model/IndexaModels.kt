@@ -23,6 +23,12 @@ data class IndexaPortfolioSnapshot(
     val positions: List<IndexaPortfolioPosition>,
 )
 
+data class IndexaPerformanceHistory(
+    val accountNumber: String,
+    val valueHistory: Map<String, Double>,
+    val normalizedHistory: Map<String, Double>,
+)
+
 data class IndexaPortfolioPosition(
     val isin: String?,
     val name: String,

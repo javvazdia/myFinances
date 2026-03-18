@@ -1,5 +1,6 @@
 package com.myfinances.app.presentation.accounts
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -22,6 +23,7 @@ import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -34,6 +36,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -325,7 +330,13 @@ internal fun AccountCard(
 internal fun AccountDetailScreen(
     account: Account,
     currentBalanceMinor: Long,
+    historyChart: AccountHistoryChart?,
+    availableHistoryModes: List<AccountHistoryMode>,
+    selectedHistoryMode: AccountHistoryMode,
+    isLoadingHistory: Boolean,
+    historyErrorMessage: String?,
     positions: List<InvestmentPosition>,
+    onSelectHistoryMode: (AccountHistoryMode) -> Unit,
     onBack: () -> Unit,
     onEditAccount: (String) -> Unit,
     onRequestDeleteAccount: (String) -> Unit,
@@ -355,6 +366,17 @@ internal fun AccountDetailScreen(
             AccountSummaryCard(
                 account = account,
                 currentBalanceMinor = currentBalanceMinor,
+            )
+        }
+
+        item {
+            AccountHistoryCard(
+                chart = historyChart,
+                availableModes = availableHistoryModes,
+                selectedMode = selectedHistoryMode,
+                isLoading = isLoadingHistory,
+                errorMessage = historyErrorMessage,
+                onSelectMode = onSelectHistoryMode,
             )
         }
 
@@ -485,6 +507,154 @@ private fun AccountSummaryCard(
 }
 
 @Composable
+private fun AccountHistoryCard(
+    chart: AccountHistoryChart?,
+    availableModes: List<AccountHistoryMode>,
+    selectedMode: AccountHistoryMode,
+    isLoading: Boolean,
+    errorMessage: String?,
+    onSelectMode: (AccountHistoryMode) -> Unit,
+) {
+    Card {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = chart?.title ?: "Account history",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+            )
+
+            if (availableModes.size > 1) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    availableModes.forEach { mode ->
+                        val isSelected = mode == selectedMode
+                        if (isSelected) {
+                            Button(onClick = { onSelectMode(mode) }) {
+                                Text(mode.label)
+                            }
+                        } else {
+                            OutlinedButton(onClick = { onSelectMode(mode) }) {
+                                Text(mode.label)
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (errorMessage != null) {
+                Text(
+                    text = errorMessage,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+
+            when {
+                isLoading && (chart == null || chart.points.isEmpty()) -> {
+                    Text(
+                        text = "Loading history...",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                chart == null || chart.points.isEmpty() -> {
+                    Text(
+                        text = "No history is available for this account yet.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                else -> {
+                    val lineColor = MaterialTheme.colorScheme.primary
+
+                    Text(
+                        text = chart.subtitle,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text(
+                            text = chart.minimumLabel,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
+                            text = chart.maximumLabel,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+
+                    Canvas(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(180.dp),
+                    ) {
+                        val points = chart.points
+                        if (points.isEmpty()) {
+                            return@Canvas
+                        }
+
+                        val values = points.map(AccountHistoryPoint::value)
+                        val minValue = values.minOrNull() ?: 0.0
+                        val maxValue = values.maxOrNull() ?: 0.0
+                        val valueRange = (maxValue - minValue).takeIf { range -> range > 0.0 } ?: 1.0
+                        val horizontalStep = if (points.size > 1) {
+                            size.width / (points.size - 1)
+                        } else {
+                            0f
+                        }
+                        val path = Path()
+
+                        points.forEachIndexed { index, point ->
+                            val x = if (points.size == 1) size.width / 2f else horizontalStep * index
+                            val normalized = ((point.value - minValue) / valueRange).toFloat()
+                            val y = size.height - (normalized * size.height)
+                            val offset = Offset(x, y)
+                            if (index == 0) {
+                                path.moveTo(offset.x, offset.y)
+                            } else {
+                                path.lineTo(offset.x, offset.y)
+                            }
+                        }
+
+                        drawPath(
+                            path = path,
+                            color = lineColor,
+                            style = Stroke(width = 6f),
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text(
+                            text = chart.startLabel,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
+                            text = chart.endLabel,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun InvestmentPositionCard(
     position: InvestmentPosition,
     currencyCode: String,
@@ -534,3 +704,10 @@ private fun EmptyDetailCard(message: String) {
         )
     }
 }
+
+private val AccountHistoryMode.label: String
+    get() = when (this) {
+        AccountHistoryMode.VALUE -> "Value"
+        AccountHistoryMode.PERFORMANCE -> "Performance"
+        AccountHistoryMode.SNAPSHOTS -> "Snapshots"
+    }

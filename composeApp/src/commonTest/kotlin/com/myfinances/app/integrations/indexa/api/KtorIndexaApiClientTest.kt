@@ -110,6 +110,100 @@ class KtorIndexaApiClientTest {
         assertEquals("COMISIÓN TRASPASO FONDO", transactions.first().operationType)
         assertEquals(4567, transactions.last().operationCode)
     }
+    @Test
+    fun mapsIndexaPerformanceResponseIntoValueAndNormalizedHistory() {
+        val payload = testJson.parseToJsonElement(
+            """
+            {
+              "performance": {
+                "period": ["2024-01-31", "2024-02-29"],
+                "real": [102, 105],
+                "history": [
+                  {
+                    "date": "2024-01-31",
+                    "total_amount": 12400.0
+                  },
+                  {
+                    "date": "2024-02-29",
+                    "total_amount": 12650.0
+                  }
+                ]
+              }
+            }
+            """.trimIndent(),
+        )
+
+        val history = parsePerformanceHistoryPayload(
+            accountNumber = "INDEXA01",
+            payload = payload,
+        )
+
+        assertEquals(12400.0, history.valueHistory["2024-01-31"])
+        assertEquals(12650.0, history.valueHistory["2024-02-29"])
+        assertEquals(1.02, history.normalizedHistory["2024-01-31"])
+        assertEquals(1.05, history.normalizedHistory["2024-02-29"])
+    }
+
+    @Test
+    fun mapsIndexaPerformanceIntervalShapeIntoValueAndNormalizedHistory() {
+        val payload = testJson.parseToJsonElement(
+            """
+            {
+              "history": [
+                {
+                  "date": "2024-01-31",
+                  "total_amount": 12400.0
+                },
+                {
+                  "date": "2024-02-29",
+                  "total_amount": 12650.0
+                }
+              ],
+              "performance_interval": {
+                "period": ["2024-01-31", "2024-02-29"],
+                "real": [102, 105]
+              }
+            }
+            """.trimIndent(),
+        )
+
+        val history = parsePerformanceHistoryPayload(
+            accountNumber = "INDEXA01",
+            payload = payload,
+        )
+
+        assertEquals(12400.0, history.valueHistory["2024-01-31"])
+        assertEquals(12650.0, history.valueHistory["2024-02-29"])
+        assertEquals(1.02, history.normalizedHistory["2024-01-31"])
+        assertEquals(1.05, history.normalizedHistory["2024-02-29"])
+    }
+
+    @Test
+    fun mapsLiveIndexaObjectHistoryShapeIntoNormalizedHistory() {
+        val payload = testJson.parseToJsonElement(
+            """
+            {
+              "performance_interval": {
+                "period": ["2024-09-30", "2024-10-31"],
+                "real": [100.0, 101.5]
+              },
+              "history": {
+                "2024-09-30": 1.0,
+                "2024-10-31": 1.015
+              }
+            }
+            """.trimIndent(),
+        )
+
+        val history = parsePerformanceHistoryPayload(
+            accountNumber = "INDEXA01",
+            payload = payload,
+        )
+
+        assertEquals(emptyMap(), history.valueHistory)
+        assertEquals(1.0, history.normalizedHistory["2024-09-30"])
+        assertEquals(1.015, history.normalizedHistory["2024-10-31"])
+    }
 }
 
 @kotlinx.serialization.Serializable

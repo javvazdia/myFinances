@@ -1,6 +1,7 @@
 package com.myfinances.app.data.local
 
 import com.myfinances.app.data.local.entity.AccountEntity
+import com.myfinances.app.data.local.entity.AccountValuationSnapshotEntity
 import com.myfinances.app.data.local.entity.CategoryEntity
 import com.myfinances.app.data.local.entity.ExternalAccountLinkEntity
 import com.myfinances.app.data.local.entity.ExternalConnectionEntity
@@ -8,6 +9,7 @@ import com.myfinances.app.data.local.entity.ExternalSyncRunEntity
 import com.myfinances.app.data.local.entity.InvestmentPositionEntity
 import com.myfinances.app.data.local.entity.TransactionEntity
 import com.myfinances.app.domain.model.Account
+import com.myfinances.app.domain.model.AccountValuationSnapshot
 import com.myfinances.app.domain.model.Category
 import com.myfinances.app.domain.model.FinanceTransaction
 import com.myfinances.app.domain.model.InvestmentPosition
@@ -44,6 +46,28 @@ object AccountEntityMapper {
         isArchived = model.isArchived,
         createdAtEpochMs = model.createdAtEpochMs,
         updatedAtEpochMs = model.updatedAtEpochMs,
+    )
+}
+
+object AccountValuationSnapshotEntityMapper {
+    fun toDomain(entity: AccountValuationSnapshotEntity): AccountValuationSnapshot = AccountValuationSnapshot(
+        id = entity.id,
+        accountId = entity.accountId,
+        sourceProvider = entity.sourceProvider,
+        currencyCode = entity.currencyCode,
+        valueMinor = entity.valueMinor,
+        valuationDate = entity.valuationDate,
+        capturedAtEpochMs = entity.capturedAtEpochMs,
+    )
+
+    fun toEntity(model: AccountValuationSnapshot): AccountValuationSnapshotEntity = AccountValuationSnapshotEntity(
+        id = model.id,
+        accountId = model.accountId,
+        sourceProvider = model.sourceProvider,
+        currencyCode = model.currencyCode,
+        valueMinor = model.valueMinor,
+        valuationDate = model.valuationDate,
+        capturedAtEpochMs = model.capturedAtEpochMs,
     )
 }
 

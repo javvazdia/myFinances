@@ -3,9 +3,11 @@ package com.myfinances.app.integrations.indexa.api
 import com.myfinances.app.integrations.indexa.model.IndexaAccountSummary
 import com.myfinances.app.integrations.indexa.model.IndexaCashTransaction
 import com.myfinances.app.integrations.indexa.model.IndexaInstrumentTransaction
+import com.myfinances.app.integrations.indexa.model.IndexaPerformanceHistory
 import com.myfinances.app.integrations.indexa.model.IndexaPortfolioPosition
 import com.myfinances.app.integrations.indexa.model.IndexaPortfolioSnapshot
 import com.myfinances.app.integrations.indexa.model.IndexaUserProfile
+import com.myfinances.app.logging.AppLogger
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.engine.cio.CIO
@@ -19,9 +21,13 @@ import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 private const val INDEXA_API_BASE_URL = "https://api.indexacapital.com"
@@ -98,6 +104,26 @@ class KtorIndexaApiClient(
                         )
                     }
                 },
+        )
+    }
+
+    override suspend fun fetchPerformance(
+        accessToken: String,
+        accountNumber: String,
+    ): IndexaPerformanceHistory {
+        AppLogger.debug(
+            tag = "IndexaApi",
+            message = "Fetching performance history for provider account $accountNumber",
+        )
+        val response = httpClient.get {
+            url("$INDEXA_API_BASE_URL/accounts/$accountNumber/performance")
+            header(INDEXA_AUTH_HEADER, accessToken)
+            header(HttpHeaders.Accept, ContentType.Application.Json.toString())
+        }.body<JsonElement>()
+
+        return parsePerformanceHistoryPayload(
+            accountNumber = accountNumber,
+            payload = response,
         )
     }
 
@@ -178,6 +204,109 @@ private data class IndexaPortfolioResponse(
     @SerialName("instrument_accounts")
     val instrumentAccounts: List<IndexaInstrumentAccountResponse>? = null,
 )
+
+internal fun parsePerformanceHistoryPayload(
+    accountNumber: String,
+    payload: JsonElement,
+): IndexaPerformanceHistory {
+    val root = payload as? JsonObject ?: JsonObject(emptyMap())
+    val performance = root["performance"] as? JsonObject
+    val performanceInterval = root["performance_interval"] as? JsonObject
+    val topLevelHistory = root["history"]
+
+    val topLevelHistoryMap = parseHistoryMap(topLevelHistory)
+    val topLevelHistoryEntries = parseHistoryEntries(topLevelHistory)
+    val performanceHistoryEntries = parseHistoryEntries(performance?.get("history"))
+    val intervalHistoryEntries = parseHistoryEntries(performanceInterval?.get("history"))
+
+    val valueHistory = when {
+        topLevelHistoryEntries.isNotEmpty() -> topLevelHistoryEntries.associate { entry -> entry.date to entry.totalAmount }
+        performanceHistoryEntries.isNotEmpty() -> performanceHistoryEntries.associate { entry -> entry.date to entry.totalAmount }
+        intervalHistoryEntries.isNotEmpty() -> intervalHistoryEntries.associate { entry -> entry.date to entry.totalAmount }
+        else -> emptyMap()
+    }
+
+    val normalizedHistory = parseNormalizedSeries(performance)
+        .ifEmpty { parseNormalizedSeries(performanceInterval) }
+        .ifEmpty { topLevelHistoryMap }
+
+    AppLogger.debug(
+        tag = "IndexaApi",
+        message = buildString {
+            append("Parsed performance payload for account ")
+            append(accountNumber)
+            append(": rootKeys=")
+            append(root.keys.sorted().joinToString(","))
+            append(", topLevelHistoryShape=")
+            append(historyShape(topLevelHistory))
+            append(", performanceHistoryShape=")
+            append(historyShape(performance?.get("history")))
+            append(", intervalHistoryShape=")
+            append(historyShape(performanceInterval?.get("history")))
+            append(", valueHistory=")
+            append(valueHistory.size)
+            append(", normalizedHistory=")
+            append(normalizedHistory.size)
+        },
+    )
+
+    return IndexaPerformanceHistory(
+        accountNumber = accountNumber,
+        valueHistory = valueHistory,
+        normalizedHistory = normalizedHistory,
+    )
+}
+
+private data class IndexaPerformanceHistoryEntryResponse(
+    val date: String,
+    val totalAmount: Double,
+)
+
+private fun parseHistoryMap(history: JsonElement?): Map<String, Double> =
+    (history as? JsonObject)
+        ?.mapNotNull { (date, value) ->
+            value.jsonPrimitive.doubleOrNull?.let { numericValue ->
+                date to numericValue
+            }
+        }
+        ?.toMap()
+        .orEmpty()
+
+private fun parseHistoryEntries(history: JsonElement?): List<IndexaPerformanceHistoryEntryResponse> =
+    (history as? JsonArray)
+        ?.mapNotNull { element ->
+            runCatching {
+                val jsonObject = element.jsonObject
+                val date = jsonObject["date"]?.jsonPrimitive?.contentOrNull ?: return@runCatching null
+                val totalAmount = jsonObject["total_amount"]?.jsonPrimitive?.doubleOrNull ?: return@runCatching null
+                IndexaPerformanceHistoryEntryResponse(
+                    date = date,
+                    totalAmount = totalAmount,
+                )
+            }.getOrNull()
+        }
+        .orEmpty()
+
+private fun parseNormalizedSeries(section: JsonObject?): Map<String, Double> {
+    val period = (section?.get("period") as? JsonArray)
+        ?.mapNotNull { element -> element.jsonPrimitive.contentOrNull }
+        .orEmpty()
+    val real = (section?.get("real") as? JsonArray)
+        ?.mapNotNull { element -> element.jsonPrimitive.doubleOrNull }
+        .orEmpty()
+
+    return period
+        .zip(real)
+        .associate { (date, value) -> date to (value / 100.0) }
+}
+
+private fun historyShape(history: JsonElement?): String =
+    when (history) {
+        is JsonArray -> "array:${history.size}"
+        is JsonObject -> "object:${history.size}"
+        null -> "missing"
+        else -> history::class.simpleName ?: "unknown"
+    }
 
 @Serializable
 private data class IndexaPortfolioSummaryResponse(

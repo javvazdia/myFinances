@@ -3,6 +3,7 @@ package com.myfinances.app.integrations.indexa.sync
 import com.myfinances.app.data.integration.InMemoryConnectionSecretStore
 import com.myfinances.app.data.integration.InMemoryExternalConnectionsRepository
 import com.myfinances.app.domain.model.Account
+import com.myfinances.app.domain.model.AccountValuationSnapshot
 import com.myfinances.app.domain.model.AccountSourceType
 import com.myfinances.app.domain.model.AccountType
 import com.myfinances.app.domain.model.Category
@@ -18,6 +19,7 @@ import com.myfinances.app.integrations.indexa.api.StubIndexaApiClient
 import com.myfinances.app.integrations.indexa.model.IndexaAccountSummary
 import com.myfinances.app.integrations.indexa.model.IndexaCashTransaction
 import com.myfinances.app.integrations.indexa.model.IndexaInstrumentTransaction
+import com.myfinances.app.integrations.indexa.model.IndexaPerformanceHistory
 import com.myfinances.app.integrations.indexa.model.IndexaPortfolioPosition
 import com.myfinances.app.integrations.indexa.model.IndexaPortfolioSnapshot
 import com.myfinances.app.integrations.indexa.model.IndexaUserProfile
@@ -78,6 +80,7 @@ class StubIndexaIntegrationServiceTest {
 
         val importedAccounts = ledgerRepository.observeAccounts(includeArchived = true).first()
         val importedTransactions = ledgerRepository.observeAllTransactions().first()
+        val importedSnapshots = ledgerRepository.observeAccountValuationSnapshots(importedAccounts.first().id).first()
         val importedCategories = ledgerRepository.observeCategories().first()
         val updatedConnection = connectionsRepository.observeConnections().first().first()
         val links = connectionsRepository.observeAccountLinks(connection.id).first()
@@ -88,6 +91,8 @@ class StubIndexaIntegrationServiceTest {
         assertEquals(1, syncRun.importedPositions)
         assertEquals(1, importedAccounts.size)
         assertEquals(1, importedTransactions.size)
+        assertEquals(1, importedSnapshots.size)
+        assertEquals(12_450_32L, importedSnapshots.first().valueMinor)
         assertTrue(importedCategories.any { category -> category.name == "Investment fees" })
         assertEquals("Indexa Capital", importedAccounts.first().sourceProvider)
         assertEquals("cash-demo-1", importedTransactions.first().externalTransactionId)
@@ -135,6 +140,7 @@ class StubIndexaIntegrationServiceTest {
 private class FakeLedgerRepository : LedgerRepository {
     private val accounts = MutableStateFlow<List<Account>>(emptyList())
     private val positionsByAccount = mutableMapOf<String, MutableStateFlow<List<InvestmentPosition>>>()
+    private val snapshotsByAccount = mutableMapOf<String, MutableStateFlow<List<AccountValuationSnapshot>>>()
     private val categories = MutableStateFlow<List<Category>>(emptyList())
     private val transactions = MutableStateFlow<List<FinanceTransaction>>(emptyList())
 
@@ -142,6 +148,9 @@ private class FakeLedgerRepository : LedgerRepository {
 
     override fun observeInvestmentPositions(accountId: String): Flow<List<InvestmentPosition>> =
         positionsByAccount.getOrPut(accountId) { MutableStateFlow(emptyList()) }
+
+    override fun observeAccountValuationSnapshots(accountId: String): Flow<List<AccountValuationSnapshot>> =
+        snapshotsByAccount.getOrPut(accountId) { MutableStateFlow(emptyList()) }
 
     override fun observeCategories(): Flow<List<Category>> = categories
 
@@ -181,6 +190,14 @@ private class FakeLedgerRepository : LedgerRepository {
             .filterNot { existing -> existing.id == transaction.id }
             .plus(transaction)
             .sortedByDescending(FinanceTransaction::postedAtEpochMs)
+    }
+
+    override suspend fun upsertAccountValuationSnapshot(snapshot: AccountValuationSnapshot) {
+        snapshotsByAccount.getOrPut(snapshot.accountId) { MutableStateFlow(emptyList()) }.value =
+            snapshotsByAccount.getValue(snapshot.accountId).value
+                .filterNot { existing -> existing.id == snapshot.id }
+                .plus(snapshot)
+                .sortedBy(AccountValuationSnapshot::capturedAtEpochMs)
     }
 
     override suspend fun deleteAccount(accountId: String) = Unit
@@ -266,6 +283,23 @@ private class TransferHeavyIndexaApiClient : IndexaApiClient {
             operationCode = 102,
             operationType = "CARGO COMISIONES",
             comments = "Platform fee",
+        ),
+    )
+
+    override suspend fun fetchPerformance(
+        accessToken: String,
+        accountNumber: String,
+    ): IndexaPerformanceHistory = IndexaPerformanceHistory(
+        accountNumber = accountNumber,
+        valueHistory = mapOf(
+            "2026-01-31" to 9_200.0,
+            "2026-02-28" to 9_350.0,
+            "2026-03-18" to 9_500.0,
+        ),
+        normalizedHistory = mapOf(
+            "2026-01-31" to 1.01,
+            "2026-02-28" to 1.03,
+            "2026-03-18" to 1.05,
         ),
     )
 

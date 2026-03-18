@@ -3,6 +3,7 @@ package com.myfinances.app.integrations.indexa.api
 import com.myfinances.app.integrations.indexa.model.IndexaAccountSummary
 import com.myfinances.app.integrations.indexa.model.IndexaCashTransaction
 import com.myfinances.app.integrations.indexa.model.IndexaInstrumentTransaction
+import com.myfinances.app.integrations.indexa.model.IndexaPerformanceHistory
 import com.myfinances.app.integrations.indexa.model.IndexaPortfolioPosition
 import com.myfinances.app.integrations.indexa.model.IndexaPortfolioSnapshot
 import com.myfinances.app.integrations.indexa.model.IndexaUserProfile
@@ -44,6 +45,29 @@ class StubIndexaApiClient : IndexaApiClient {
                 marketValue = 3_038.05,
                 costAmount = 2_800.0,
             ),
+        ),
+    )
+
+    override suspend fun fetchPerformance(
+        accessToken: String,
+        accountNumber: String,
+    ): IndexaPerformanceHistory = IndexaPerformanceHistory(
+        accountNumber = accountNumber,
+        valueHistory = linkedMapOf(
+            "2025-10-31" to 11_980.0,
+            "2025-11-30" to 12_110.0,
+            "2025-12-31" to 12_220.0,
+            "2026-01-31" to 12_320.0,
+            "2026-02-28" to 12_390.0,
+            "2026-03-18" to 12_450.32,
+        ),
+        normalizedHistory = linkedMapOf(
+            "2025-10-31" to 0.98,
+            "2025-11-30" to 1.01,
+            "2025-12-31" to 1.03,
+            "2026-01-31" to 1.05,
+            "2026-02-28" to 1.07,
+            "2026-03-18" to 1.09,
         ),
     )
 

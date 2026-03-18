@@ -3,6 +3,7 @@ package com.myfinances.app.integrations.indexa.sync
 import com.myfinances.app.domain.model.integration.ExternalConnection
 import com.myfinances.app.domain.model.integration.ExternalSyncRun
 import com.myfinances.app.integrations.indexa.model.IndexaConnectionPreview
+import com.myfinances.app.integrations.indexa.model.IndexaPerformanceHistory
 
 interface IndexaIntegrationService {
     suspend fun testConnection(accessToken: String): IndexaConnectionPreview
@@ -12,4 +13,6 @@ interface IndexaIntegrationService {
     suspend fun runSync(connectionId: String): ExternalSyncRun
 
     suspend fun disconnect(connectionId: String)
+
+    suspend fun fetchPerformanceHistory(localAccountId: String): IndexaPerformanceHistory?
 }

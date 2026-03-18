@@ -1,6 +1,7 @@
 package com.myfinances.app.integrations.indexa.sync
 
 import com.myfinances.app.domain.model.Account
+import com.myfinances.app.domain.model.AccountValuationSnapshot
 import com.myfinances.app.domain.model.AccountSourceType
 import com.myfinances.app.domain.model.AccountType
 import com.myfinances.app.domain.model.InvestmentPosition
@@ -16,8 +17,10 @@ import com.myfinances.app.domain.repository.LedgerRepository
 import com.myfinances.app.integrations.indexa.api.IndexaApiClient
 import com.myfinances.app.integrations.indexa.model.IndexaAccountSummary
 import com.myfinances.app.integrations.indexa.model.IndexaConnectionPreview
+import com.myfinances.app.integrations.indexa.model.IndexaPerformanceHistory
 import com.myfinances.app.integrations.indexa.model.IndexaPortfolioSnapshot
 import com.myfinances.app.integrations.indexa.model.IndexaPortfolioPosition
+import com.myfinances.app.logging.AppLogger
 import kotlinx.coroutines.flow.first
 import kotlin.random.Random
 import kotlin.time.Clock
@@ -156,6 +159,12 @@ class StubIndexaIntegrationService(
                 }
 
                 ledgerRepository.upsertAccount(updatedAccount)
+                portfolio.toAccountValuationSnapshot(
+                    account = updatedAccount,
+                    capturedAtEpochMs = importedAt,
+                )?.let { snapshot ->
+                    ledgerRepository.upsertAccountValuationSnapshot(snapshot)
+                }
                 ledgerRepository.replaceInvestmentPositions(
                     accountId = localAccountId,
                     positions = positions,
@@ -255,6 +264,85 @@ class StubIndexaIntegrationService(
         externalConnectionsRepository.deleteConnection(connection.id)
     }
 
+    override suspend fun fetchPerformanceHistory(localAccountId: String): IndexaPerformanceHistory? {
+        val localAccount = ledgerRepository.observeAccounts(includeArchived = true)
+            .first()
+            .firstOrNull { account -> account.id == localAccountId }
+            ?: run {
+                AppLogger.debug(
+                    tag = "IndexaSync",
+                    message = "No local account found for performance request: $localAccountId",
+                )
+                return null
+            }
+        AppLogger.debug(
+            tag = "IndexaSync",
+            message = "Fetching performance history for local account ${localAccount.id} (${localAccount.name}), provider account ${localAccount.externalAccountId ?: "unknown"}",
+        )
+        val connections = externalConnectionsRepository.observeConnections().first()
+            .filter { connection -> connection.providerId == ExternalProviderId.INDEXA }
+        AppLogger.debug(
+            tag = "IndexaSync",
+            message = "Found ${connections.size} Indexa connection(s) while resolving performance history",
+        )
+        val linkedConnection = connections.firstNotNullOfOrNull { connection ->
+            val link = externalConnectionsRepository.observeAccountLinks(connection.id)
+                .first()
+                .firstOrNull { accountLink -> accountLink.localAccountId == localAccountId }
+            if (link != null) {
+                connection to link
+            } else {
+                null
+            }
+        } ?: connections.firstOrNull()?.let { connection ->
+            val providerAccountId = localAccount.externalAccountId ?: return@let null
+            connection to ExternalAccountLink(
+                connectionId = connection.id,
+                providerAccountId = providerAccountId,
+                localAccountId = localAccount.id,
+                accountDisplayName = localAccount.name,
+                accountTypeLabel = localAccount.type.name,
+                currencyCode = localAccount.currencyCode,
+                lastImportedAtEpochMs = localAccount.lastSyncedAtEpochMs,
+            )
+        } ?: run {
+            AppLogger.debug(
+                tag = "IndexaSync",
+                message = "Could not resolve an Indexa connection/account link for local account ${localAccount.id}",
+            )
+            return null
+        }
+
+        val accessToken = connectionSecretStore.readSecret(
+            providerId = ExternalProviderId.INDEXA,
+            connectionId = linkedConnection.first.id,
+        ) ?: run {
+            AppLogger.debug(
+                tag = "IndexaSync",
+                message = "No stored Indexa token found for connection ${linkedConnection.first.id}",
+            )
+            return null
+        }
+
+        return runCatching {
+            apiClient.fetchPerformance(
+                accessToken = accessToken,
+                accountNumber = linkedConnection.second.providerAccountId,
+            )
+        }.onSuccess { history ->
+            AppLogger.debug(
+                tag = "IndexaSync",
+                message = "Fetched Indexa performance history for ${linkedConnection.second.providerAccountId}: valueHistory=${history.valueHistory.size}, normalizedHistory=${history.normalizedHistory.size}",
+            )
+        }.onFailure { throwable ->
+            AppLogger.error(
+                tag = "IndexaSync",
+                message = "Indexa performance fetch failed for ${linkedConnection.second.providerAccountId}: ${throwable.message}",
+                throwable = throwable,
+            )
+        }.getOrNull()
+    }
+
     private fun buildSuggestedConnectionName(fullName: String?): String =
         fullName?.trim()?.takeIf(String::isNotBlank)?.let { name ->
             "Indexa - $name"
@@ -322,6 +410,22 @@ private fun IndexaPortfolioSnapshot.toInvestmentPositions(
         valuationDate = valuationDate,
         syncedAtEpochMs = syncedAtEpochMs,
         index = index,
+    )
+}
+
+private fun IndexaPortfolioSnapshot.toAccountValuationSnapshot(
+    account: Account,
+    capturedAtEpochMs: Long,
+): AccountValuationSnapshot? {
+    val valueMinor = totalMarketValue.toMinorAmount() ?: return null
+    return AccountValuationSnapshot(
+        id = "snapshot-${account.id}-$capturedAtEpochMs",
+        accountId = account.id,
+        sourceProvider = INDEXA_PROVIDER_NAME,
+        currencyCode = account.currencyCode,
+        valueMinor = valueMinor,
+        valuationDate = valuationDate,
+        capturedAtEpochMs = capturedAtEpochMs,
     )
 }
 

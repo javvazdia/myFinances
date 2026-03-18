@@ -13,7 +13,7 @@ fun getMyFinancesDatabaseBuilder(): RoomDatabase.Builder<MyFinancesDatabase> {
 
     return Room.databaseBuilder<MyFinancesDatabase>(
         name = databaseFile.absolutePath,
-    ).addMigrations(MIGRATION_1_TO_2, MIGRATION_2_TO_3)
+    ).addMigrations(MIGRATION_1_TO_2, MIGRATION_2_TO_3, MIGRATION_3_TO_4)
         .setDriver(BundledSQLiteDriver())
 }
 

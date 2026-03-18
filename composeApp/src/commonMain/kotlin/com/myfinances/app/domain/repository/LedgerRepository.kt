@@ -1,6 +1,7 @@
 package com.myfinances.app.domain.repository
 
 import com.myfinances.app.domain.model.Account
+import com.myfinances.app.domain.model.AccountValuationSnapshot
 import com.myfinances.app.domain.model.Category
 import com.myfinances.app.domain.model.CategoryKind
 import com.myfinances.app.domain.model.FinanceTransaction
@@ -11,6 +12,8 @@ interface LedgerRepository {
     fun observeAccounts(includeArchived: Boolean = false): Flow<List<Account>>
 
     fun observeInvestmentPositions(accountId: String): Flow<List<InvestmentPosition>>
+
+    fun observeAccountValuationSnapshots(accountId: String): Flow<List<AccountValuationSnapshot>>
 
     fun observeCategories(): Flow<List<Category>>
 
@@ -28,6 +31,8 @@ interface LedgerRepository {
         accountId: String,
         positions: List<InvestmentPosition>,
     )
+
+    suspend fun upsertAccountValuationSnapshot(snapshot: AccountValuationSnapshot)
 
     suspend fun upsertCategory(category: Category)
 

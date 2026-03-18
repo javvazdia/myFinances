@@ -9,6 +9,7 @@ import androidx.room.TypeConverters
 import androidx.sqlite.SQLiteConnection
 import androidx.sqlite.execSQL
 import com.myfinances.app.data.local.dao.AccountDao
+import com.myfinances.app.data.local.dao.AccountValuationSnapshotDao
 import com.myfinances.app.data.local.dao.CategoryDao
 import com.myfinances.app.data.local.dao.ExternalAccountLinksDao
 import com.myfinances.app.data.local.dao.ExternalConnectionsDao
@@ -16,6 +17,7 @@ import com.myfinances.app.data.local.dao.ExternalSyncRunsDao
 import com.myfinances.app.data.local.dao.InvestmentPositionDao
 import com.myfinances.app.data.local.dao.TransactionDao
 import com.myfinances.app.data.local.entity.AccountEntity
+import com.myfinances.app.data.local.entity.AccountValuationSnapshotEntity
 import com.myfinances.app.data.local.entity.CategoryEntity
 import com.myfinances.app.data.local.entity.ExternalAccountLinkEntity
 import com.myfinances.app.data.local.entity.ExternalConnectionEntity
@@ -28,6 +30,7 @@ const val MY_FINANCES_DB_NAME = "my_finances.db"
 @Database(
     entities = [
         AccountEntity::class,
+        AccountValuationSnapshotEntity::class,
         CategoryEntity::class,
         ExternalConnectionEntity::class,
         ExternalAccountLinkEntity::class,
@@ -35,13 +38,15 @@ const val MY_FINANCES_DB_NAME = "my_finances.db"
         InvestmentPositionEntity::class,
         TransactionEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 @TypeConverters(FinanceTypeConverters::class)
 @ConstructedBy(MyFinancesDatabaseConstructor::class)
 abstract class MyFinancesDatabase : RoomDatabase() {
     abstract fun accountDao(): AccountDao
+
+    abstract fun accountValuationSnapshotDao(): AccountValuationSnapshotDao
 
     abstract fun categoryDao(): CategoryDao
 
@@ -159,6 +164,31 @@ val MIGRATION_2_TO_3: Migration = object : Migration(2, 3) {
         )
         connection.execSQL(
             "CREATE INDEX IF NOT EXISTS index_investment_positions_instrument_isin ON investment_positions(instrument_isin)",
+        )
+    }
+}
+
+val MIGRATION_3_TO_4: Migration = object : Migration(3, 4) {
+    override fun migrate(connection: SQLiteConnection) {
+        connection.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS account_valuation_snapshots (
+                id TEXT NOT NULL PRIMARY KEY,
+                account_id TEXT NOT NULL,
+                source_provider TEXT,
+                currency_code TEXT NOT NULL,
+                value_minor INTEGER NOT NULL,
+                valuation_date TEXT,
+                captured_at_epoch_ms INTEGER NOT NULL,
+                FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE
+            )
+            """.trimIndent(),
+        )
+        connection.execSQL(
+            "CREATE INDEX IF NOT EXISTS index_account_valuation_snapshots_account_id ON account_valuation_snapshots(account_id)",
+        )
+        connection.execSQL(
+            "CREATE INDEX IF NOT EXISTS index_account_valuation_snapshots_captured_at_epoch_ms ON account_valuation_snapshots(captured_at_epoch_ms)",
         )
     }
 }

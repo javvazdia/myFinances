@@ -3,6 +3,7 @@ package com.myfinances.app.integrations.indexa.api
 import com.myfinances.app.integrations.indexa.model.IndexaAccountSummary
 import com.myfinances.app.integrations.indexa.model.IndexaCashTransaction
 import com.myfinances.app.integrations.indexa.model.IndexaInstrumentTransaction
+import com.myfinances.app.integrations.indexa.model.IndexaPerformanceHistory
 import com.myfinances.app.integrations.indexa.model.IndexaPortfolioSnapshot
 import com.myfinances.app.integrations.indexa.model.IndexaUserProfile
 
@@ -15,6 +16,11 @@ interface IndexaApiClient {
         accessToken: String,
         accountNumber: String,
     ): IndexaPortfolioSnapshot
+
+    suspend fun fetchPerformance(
+        accessToken: String,
+        accountNumber: String,
+    ): IndexaPerformanceHistory
 
     suspend fun fetchCashTransactions(
         accessToken: String,

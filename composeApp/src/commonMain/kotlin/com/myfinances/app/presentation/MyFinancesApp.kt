@@ -74,6 +74,7 @@ fun MyFinancesApp(appDependencies: AppDependencies) {
             composable(AppDestination.Accounts.route) {
                 AccountsRoute(
                     ledgerRepository = appDependencies.ledgerRepository,
+                    indexaIntegrationService = appDependencies.indexaIntegrationService,
                 )
             }
             composable(AppDestination.Transactions.route) {

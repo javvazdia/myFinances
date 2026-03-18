@@ -2,6 +2,7 @@ package com.myfinances.app.data.local
 
 import com.myfinances.app.data.local.db.MyFinancesDatabase
 import com.myfinances.app.domain.model.Account
+import com.myfinances.app.domain.model.AccountValuationSnapshot
 import com.myfinances.app.domain.model.Category
 import com.myfinances.app.domain.model.CategoryKind
 import com.myfinances.app.domain.model.FinanceTransaction
@@ -27,6 +28,11 @@ class LocalLedgerRepository(
         database.investmentPositionDao()
             .observePositionsForAccount(accountId)
             .map { positions -> positions.map(InvestmentPositionEntityMapper::toDomain) }
+
+    override fun observeAccountValuationSnapshots(accountId: String): Flow<List<AccountValuationSnapshot>> =
+        database.accountValuationSnapshotDao()
+            .observeSnapshotsForAccount(accountId)
+            .map { snapshots -> snapshots.map(AccountValuationSnapshotEntityMapper::toDomain) }
 
     override fun observeCategories(): Flow<List<Category>> =
         database.categoryDao()
@@ -66,6 +72,11 @@ class LocalLedgerRepository(
             database.investmentPositionDao()
                 .upsertPositions(positions.map(InvestmentPositionEntityMapper::toEntity))
         }
+    }
+
+    override suspend fun upsertAccountValuationSnapshot(snapshot: AccountValuationSnapshot) {
+        database.accountValuationSnapshotDao()
+            .upsertSnapshot(AccountValuationSnapshotEntityMapper.toEntity(snapshot))
     }
 
     override suspend fun upsertCategory(category: Category) {
