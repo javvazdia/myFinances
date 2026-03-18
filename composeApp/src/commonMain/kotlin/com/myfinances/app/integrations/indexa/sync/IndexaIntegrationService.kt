@@ -10,4 +10,6 @@ interface IndexaIntegrationService {
     suspend fun connect(accessToken: String): ExternalConnection
 
     suspend fun runSync(connectionId: String): ExternalSyncRun
+
+    suspend fun disconnect(connectionId: String)
 }

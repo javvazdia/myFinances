@@ -241,6 +241,20 @@ class StubIndexaIntegrationService(
         }
     }
 
+    override suspend fun disconnect(connectionId: String) {
+        val connection = externalConnectionsRepository
+            .observeConnections()
+            .first()
+            .firstOrNull { item -> item.id == connectionId && item.providerId == ExternalProviderId.INDEXA }
+            ?: return
+
+        connectionSecretStore.deleteSecret(
+            providerId = ExternalProviderId.INDEXA,
+            connectionId = connection.id,
+        )
+        externalConnectionsRepository.deleteConnection(connection.id)
+    }
+
     private fun buildSuggestedConnectionName(fullName: String?): String =
         fullName?.trim()?.takeIf(String::isNotBlank)?.let { name ->
             "Indexa - $name"

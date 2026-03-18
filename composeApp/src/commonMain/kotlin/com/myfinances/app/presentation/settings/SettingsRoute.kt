@@ -25,10 +25,14 @@ fun SettingsRoute(
     val uiState by settingsViewModel.uiState.collectAsState()
     SettingsScreen(
         uiState = uiState,
+        onSelectConnection = settingsViewModel::selectConnection,
         onIndexaTokenChange = settingsViewModel::onIndexaTokenChange,
         onTestIndexaConnection = settingsViewModel::testIndexaConnection,
         onConnectIndexa = settingsViewModel::connectIndexa,
         onRunIndexaSync = settingsViewModel::runIndexaSync,
+        onRequestDisconnectConnection = settingsViewModel::requestDisconnectConnection,
+        onConfirmDisconnectConnection = settingsViewModel::confirmDisconnectConnection,
+        onDismissDisconnectDialog = settingsViewModel::dismissDisconnectDialog,
         onNameChange = settingsViewModel::onNameChange,
         onKindSelected = settingsViewModel::onKindSelected,
         onSaveCategory = settingsViewModel::saveCategory,

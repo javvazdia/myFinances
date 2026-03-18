@@ -30,10 +30,12 @@ import com.myfinances.app.presentation.shared.formatTimestampLabel
 @Composable
 internal fun ConnectionsOverviewCard(
     uiState: SettingsUiState,
+    onSelectConnection: (String) -> Unit,
     onIndexaTokenChange: (String) -> Unit,
     onTestIndexaConnection: () -> Unit,
     onConnectIndexa: () -> Unit,
     onRunIndexaSync: () -> Unit,
+    onRequestDisconnectConnection: (String) -> Unit,
 ) {
     Card {
         Column(
@@ -61,6 +63,8 @@ internal fun ConnectionsOverviewCard(
                 ProviderCard(
                     provider = provider,
                     connection = connection,
+                    onSelectConnection = onSelectConnection,
+                    isSelected = uiState.selectedConnectionId == connection?.id,
                 )
             }
 
@@ -70,6 +74,7 @@ internal fun ConnectionsOverviewCard(
                 onTestIndexaConnection = onTestIndexaConnection,
                 onConnectIndexa = onConnectIndexa,
                 onRunIndexaSync = onRunIndexaSync,
+                onRequestDisconnectConnection = onRequestDisconnectConnection,
             )
         }
     }
@@ -82,10 +87,12 @@ private fun IndexaSetupCard(
     onTestIndexaConnection: () -> Unit,
     onConnectIndexa: () -> Unit,
     onRunIndexaSync: () -> Unit,
+    onRequestDisconnectConnection: (String) -> Unit,
 ) {
     val indexaConnection = uiState.connections.firstOrNull { connection ->
         connection.providerId == ExternalProviderId.INDEXA
     }
+    val isSelectedConnection = uiState.selectedConnection?.id == indexaConnection?.id
     val indexaSyncRuns = indexaConnection
         ?.let { connection -> uiState.syncRunsByConnection[connection.id].orEmpty() }
         .orEmpty()
@@ -150,6 +157,22 @@ private fun IndexaSetupCard(
                     ) {
                         Text(if (uiState.isSyncingIndexa) "Syncing..." else "Sync now")
                     }
+
+                    Button(
+                        onClick = { onRequestDisconnectConnection(indexaConnection.id) },
+                        enabled = !uiState.isTestingIndexa &&
+                            !uiState.isConnectingIndexa &&
+                            !uiState.isSyncingIndexa &&
+                            uiState.pendingDisconnectConnectionId == null,
+                    ) {
+                        Text(
+                            if (uiState.pendingDisconnectConnectionId == indexaConnection.id) {
+                                "Disconnecting..."
+                            } else {
+                                "Disconnect"
+                            },
+                        )
+                    }
                 }
             }
 
@@ -173,11 +196,74 @@ private fun IndexaSetupCard(
                 IndexaPreviewSection(preview = uiState.indexaPreview)
             }
 
-            SyncHistorySection(
-                syncRuns = indexaSyncRuns,
-                isSyncing = uiState.isSyncingIndexa,
-            )
+            if (indexaConnection != null && isSelectedConnection) {
+                ConnectionDetailSection(
+                    connection = indexaConnection,
+                    accountLinks = uiState.selectedConnection
+                        ?.takeIf { connection -> connection.id == indexaConnection.id }
+                        ?.let { uiState.selectedConnectionAccountLinks }
+                        ?: uiState.accountLinksByConnection[indexaConnection.id].orEmpty(),
+                    syncRuns = indexaSyncRuns,
+                    isSyncing = uiState.isSyncingIndexa,
+                )
+            } else {
+                SyncHistorySection(
+                    syncRuns = indexaSyncRuns,
+                    isSyncing = uiState.isSyncingIndexa,
+                )
+            }
         }
+    }
+}
+
+@Composable
+private fun ConnectionDetailSection(
+    connection: ExternalConnection,
+    accountLinks: List<com.myfinances.app.domain.model.integration.ExternalAccountLink>,
+    syncRuns: List<ExternalSyncRun>,
+    isSyncing: Boolean,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(
+            text = "Connection details",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+        )
+
+        Card(
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+            ),
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                DetailLine(label = "Connection", value = connection.displayName)
+                DetailLine(label = "Status", value = connection.status.label)
+                DetailLine(
+                    label = "Last successful sync",
+                    value = connection.lastSuccessfulSyncEpochMs
+                        ?.let(::formatSyncRunTimestamp)
+                        ?: "No successful sync yet",
+                )
+                connection.externalUserId?.let { externalUserId ->
+                    DetailLine(label = "External user", value = externalUserId)
+                }
+                DetailLine(
+                    label = "Linked accounts",
+                    value = accountLinks.size.toString(),
+                )
+            }
+        }
+
+        LinkedAccountsSection(accountLinks = accountLinks)
+        SyncHistorySection(
+            syncRuns = syncRuns,
+            isSyncing = isSyncing,
+        )
     }
 }
 
@@ -275,6 +361,59 @@ private fun SyncRunCard(syncRun: ExternalSyncRun) {
 }
 
 @Composable
+private fun LinkedAccountsSection(
+    accountLinks: List<com.myfinances.app.domain.model.integration.ExternalAccountLink>,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            text = "Linked accounts",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+        )
+
+        if (accountLinks.isEmpty()) {
+            Text(
+                text = "No linked provider accounts yet. Run a sync to import or refresh the discovered Indexa accounts.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            return@Column
+        }
+
+        accountLinks.forEach { accountLink ->
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                ),
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        text = accountLink.accountDisplayName,
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    Text(
+                        text = buildLinkedAccountSubtitle(accountLink),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        text = buildLinkedAccountImportLabel(accountLink),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun IndexaPreviewSection(preview: IndexaConnectionPreview) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(
@@ -329,6 +468,8 @@ private fun IndexaPreviewSection(preview: IndexaConnectionPreview) {
 private fun ProviderCard(
     provider: ExternalProviderDefinition,
     connection: ExternalConnection?,
+    onSelectConnection: (String) -> Unit,
+    isSelected: Boolean,
 ) {
     Card(
         colors = CardDefaults.cardColors(
@@ -370,7 +511,36 @@ private fun ProviderCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+
+            if (connection != null) {
+                Button(
+                    onClick = { onSelectConnection(connection.id) },
+                ) {
+                    Text(if (isSelected) "Managing" else "Manage")
+                }
+            }
         }
+    }
+}
+
+@Composable
+private fun DetailLine(
+    label: String,
+    value: String,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium,
+        )
     }
 }
 
@@ -447,3 +617,18 @@ internal fun buildSyncRunSummary(syncRun: ExternalSyncRun): String {
 
     return "${syncRun.importedAccounts} $accountLabel, ${syncRun.importedTransactions} $transactionLabel, ${syncRun.importedPositions} $positionLabel"
 }
+
+internal fun buildLinkedAccountSubtitle(
+    accountLink: com.myfinances.app.domain.model.integration.ExternalAccountLink,
+): String {
+    val type = accountLink.accountTypeLabel ?: "Unknown type"
+    val currency = accountLink.currencyCode ?: "Unknown currency"
+    val localLink = accountLink.localAccountId?.let { " | linked locally" }.orEmpty()
+    return "$type | $currency$localLink"
+}
+
+internal fun buildLinkedAccountImportLabel(
+    accountLink: com.myfinances.app.domain.model.integration.ExternalAccountLink,
+): String = accountLink.lastImportedAtEpochMs
+    ?.let { importedAt -> "Last imported ${formatSyncRunTimestamp(importedAt)}" }
+    ?: "Not imported yet"

@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.myfinances.app.domain.model.Category
 import com.myfinances.app.domain.model.CategoryKind
+import com.myfinances.app.domain.model.integration.ExternalAccountLink
 import com.myfinances.app.domain.model.integration.ExternalConnection
 import com.myfinances.app.domain.model.integration.ExternalProviderId
 import com.myfinances.app.domain.model.integration.ExternalSyncRun
@@ -25,6 +26,8 @@ import kotlin.time.Clock
 
 data class SettingsUiState(
     val connections: List<ExternalConnection> = emptyList(),
+    val selectedConnectionId: String? = null,
+    val accountLinksByConnection: Map<String, List<ExternalAccountLink>> = emptyMap(),
     val syncRunsByConnection: Map<String, List<ExternalSyncRun>> = emptyMap(),
     val categories: List<Category> = emptyList(),
     val draftIndexaToken: String = "",
@@ -34,6 +37,8 @@ data class SettingsUiState(
     val isSyncingIndexa: Boolean = false,
     val indexaConnectionMessage: String? = null,
     val indexaConnectionError: String? = null,
+    val disconnectConfirmationConnectionId: String? = null,
+    val pendingDisconnectConnectionId: String? = null,
     val draftName: String = "",
     val selectedKind: CategoryKind = CategoryKind.EXPENSE,
     val editingCategoryId: String? = null,
@@ -45,6 +50,19 @@ data class SettingsUiState(
     val categoriesByKind: Map<CategoryKind, List<Category>>
         get() = categories.groupBy(Category::kind)
 
+    val selectedConnection: ExternalConnection?
+        get() = connections.firstOrNull { connection -> connection.id == selectedConnectionId }
+
+    val selectedConnectionAccountLinks: List<ExternalAccountLink>
+        get() = selectedConnection
+            ?.let { connection -> accountLinksByConnection[connection.id].orEmpty() }
+            .orEmpty()
+
+    val selectedConnectionSyncRuns: List<ExternalSyncRun>
+        get() = selectedConnection
+            ?.let { connection -> syncRunsByConnection[connection.id].orEmpty() }
+            .orEmpty()
+
     val isEditing: Boolean
         get() = editingCategoryId != null
 
@@ -52,6 +70,11 @@ data class SettingsUiState(
         get() = categories.firstOrNull { category ->
             category.id == deleteConfirmationCategoryId
         }?.name
+
+    val disconnectConfirmationConnectionName: String?
+        get() = connections.firstOrNull { connection ->
+            connection.id == disconnectConfirmationConnectionId
+        }?.displayName
 
     val isBusy: Boolean
         get() = isSaving || pendingDeleteCategoryId != null
@@ -68,49 +91,96 @@ class SettingsViewModel(
 
     init {
         val connectionsFlow = externalConnectionsRepository.observeConnections()
+        val accountLinksByConnectionFlow = connectionsFlow.flatMapLatest { connections ->
+            if (connections.isEmpty()) {
+                flowOf(emptyMap())
+            } else {
+                combine(
+                    connections.map { connection ->
+                        externalConnectionsRepository.observeAccountLinks(connection.id)
+                    },
+                ) { accountLinkLists ->
+                    connections.zip(accountLinkLists).associate { (connection, links) ->
+                        connection.id to links.sortedBy(ExternalAccountLink::accountDisplayName)
+                    }
+                }
+            }
+        }
+        val syncRunsByConnectionFlow = connectionsFlow.flatMapLatest { connections ->
+            if (connections.isEmpty()) {
+                flowOf(emptyMap())
+            } else {
+                combine(
+                    connections.map { connection ->
+                        externalConnectionsRepository.observeSyncRuns(connection.id)
+                    },
+                ) { syncRunLists ->
+                    connections.zip(syncRunLists).associate { (connection, syncRuns) ->
+                        connection.id to syncRuns.sortedByDescending(ExternalSyncRun::startedAtEpochMs)
+                    }
+                }
+            }
+        }
 
         viewModelScope.launch {
             combine(
                 ledgerRepository.observeCategories(),
                 connectionsFlow,
-                connectionsFlow.flatMapLatest { connections ->
-                    if (connections.isEmpty()) {
-                        flowOf(emptyMap())
-                    } else {
-                        combine(
-                            connections.map { connection ->
-                                externalConnectionsRepository.observeSyncRuns(connection.id)
-                            },
-                        ) { syncRunLists ->
-                            connections.zip(syncRunLists).associate { (connection, syncRuns) ->
-                                connection.id to syncRuns.sortedByDescending(ExternalSyncRun::startedAtEpochMs)
-                            }
-                        }
-                    }
-                },
-            ) { categories, connections, syncRunsByConnection ->
-                Triple(categories, connections, syncRunsByConnection)
-            }.collect { (categories, connections, syncRunsByConnection) ->
+                accountLinksByConnectionFlow,
+                syncRunsByConnectionFlow,
+            ) { categories, connections, accountLinksByConnection, syncRunsByConnection ->
+                SettingsCombinedState(
+                    categories = categories,
+                    connections = connections,
+                    accountLinksByConnection = accountLinksByConnection,
+                    syncRunsByConnection = syncRunsByConnection,
+                )
+            }.collect { combinedState ->
                 _uiState.update { currentState ->
+                    val connections = combinedState.connections
                     currentState.copy(
                         connections = connections,
-                        syncRunsByConnection = syncRunsByConnection,
-                        categories = categories,
+                        selectedConnectionId = currentState.selectedConnectionId
+                            ?.takeIf { selectedId ->
+                                connections.any { connection -> connection.id == selectedId }
+                            }
+                            ?: connections.firstOrNull()?.id,
+                        accountLinksByConnection = combinedState.accountLinksByConnection,
+                        syncRunsByConnection = combinedState.syncRunsByConnection,
+                        categories = combinedState.categories,
                         editingCategoryId = currentState.editingCategoryId
                             ?.takeIf { editingId ->
-                                categories.any { category -> category.id == editingId }
+                                combinedState.categories.any { category -> category.id == editingId }
                             },
                         deleteConfirmationCategoryId = currentState.deleteConfirmationCategoryId
                             ?.takeIf { categoryId ->
-                                categories.any { category -> category.id == categoryId }
+                                combinedState.categories.any { category -> category.id == categoryId }
                             },
                         pendingDeleteCategoryId = currentState.pendingDeleteCategoryId
                             ?.takeIf { categoryId ->
-                                categories.any { category -> category.id == categoryId }
+                                combinedState.categories.any { category -> category.id == categoryId }
+                            },
+                        disconnectConfirmationConnectionId = currentState.disconnectConfirmationConnectionId
+                            ?.takeIf { connectionId ->
+                                connections.any { connection -> connection.id == connectionId }
+                            },
+                        pendingDisconnectConnectionId = currentState.pendingDisconnectConnectionId
+                            ?.takeIf { connectionId ->
+                                connections.any { connection -> connection.id == connectionId }
                             },
                     )
                 }
             }
+        }
+    }
+
+    fun selectConnection(connectionId: String) {
+        _uiState.update { currentState ->
+            currentState.copy(
+                selectedConnectionId = connectionId,
+                indexaConnectionError = null,
+                indexaConnectionMessage = null,
+            )
         }
     }
 
@@ -205,6 +275,7 @@ class SettingsViewModel(
             }.onSuccess { connection ->
                 _uiState.update { currentState ->
                     currentState.copy(
+                        selectedConnectionId = connection.id,
                         draftIndexaToken = "",
                         isConnectingIndexa = false,
                         indexaConnectionMessage = "Saved ${connection.displayName}. Run Sync now to import those discovered Indexa accounts into the local ledger.",
@@ -224,9 +295,12 @@ class SettingsViewModel(
     }
 
     fun runIndexaSync() {
-        val connectionId = uiState.value.connections.firstOrNull { connection ->
-            connection.providerId == ExternalProviderId.INDEXA
-        }?.id
+        val connectionId = uiState.value.selectedConnection
+            ?.takeIf { connection -> connection.providerId == ExternalProviderId.INDEXA }
+            ?.id
+            ?: uiState.value.connections.firstOrNull { connection ->
+                connection.providerId == ExternalProviderId.INDEXA
+            }?.id
 
         if (connectionId == null) {
             _uiState.update { currentState ->
@@ -264,6 +338,77 @@ class SettingsViewModel(
                         isSyncingIndexa = false,
                         indexaConnectionMessage = null,
                         indexaConnectionError = throwable.message ?: "Indexa sync failed.",
+                    )
+                }
+            }
+        }
+    }
+
+    fun requestDisconnectConnection(connectionId: String) {
+        _uiState.update { currentState ->
+            val connection = currentState.connections.firstOrNull { item -> item.id == connectionId }
+                ?: return@update currentState
+
+            currentState.copy(
+                selectedConnectionId = connection.id,
+                disconnectConfirmationConnectionId = connection.id,
+                indexaConnectionError = null,
+                indexaConnectionMessage = null,
+            )
+        }
+    }
+
+    fun dismissDisconnectDialog() {
+        _uiState.update { currentState ->
+            currentState.copy(disconnectConfirmationConnectionId = null)
+        }
+    }
+
+    fun confirmDisconnectConnection() {
+        val snapshot = uiState.value
+        val connectionId = snapshot.disconnectConfirmationConnectionId ?: return
+        val connection = snapshot.connections.firstOrNull { item -> item.id == connectionId } ?: return
+
+        if (connection.providerId != ExternalProviderId.INDEXA) {
+            _uiState.update { currentState ->
+                currentState.copy(
+                    disconnectConfirmationConnectionId = null,
+                    indexaConnectionError = "Disconnect is not implemented for this provider yet.",
+                    indexaConnectionMessage = null,
+                )
+            }
+            return
+        }
+
+        viewModelScope.launch {
+            _uiState.update { currentState ->
+                currentState.copy(
+                    disconnectConfirmationConnectionId = null,
+                    pendingDisconnectConnectionId = connectionId,
+                    indexaConnectionError = null,
+                    indexaConnectionMessage = null,
+                )
+            }
+
+            runCatching {
+                indexaIntegrationService.disconnect(connectionId)
+            }.onSuccess {
+                _uiState.update { currentState ->
+                    currentState.copy(
+                        pendingDisconnectConnectionId = null,
+                        selectedConnectionId = currentState.connections
+                            .firstOrNull { item -> item.id != connectionId }
+                            ?.id,
+                        indexaConnectionMessage = "Disconnected ${connection.displayName}. Imported local accounts and transactions were kept in the ledger.",
+                        indexaConnectionError = null,
+                    )
+                }
+            }.onFailure { throwable ->
+                _uiState.update { currentState ->
+                    currentState.copy(
+                        pendingDisconnectConnectionId = null,
+                        indexaConnectionMessage = null,
+                        indexaConnectionError = throwable.message ?: "Disconnect failed.",
                     )
                 }
             }
@@ -428,6 +573,13 @@ class SettingsViewModel(
         }
     }
 }
+
+private data class SettingsCombinedState(
+    val categories: List<Category>,
+    val connections: List<ExternalConnection>,
+    val accountLinksByConnection: Map<String, List<ExternalAccountLink>>,
+    val syncRunsByConnection: Map<String, List<ExternalSyncRun>>,
+)
 
 private fun SettingsUiState.toCreateMode(): SettingsUiState =
     copy(

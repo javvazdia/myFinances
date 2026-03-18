@@ -24,10 +24,14 @@ import com.myfinances.app.domain.model.CategoryKind
 @Composable
 fun SettingsScreen(
     uiState: SettingsUiState,
+    onSelectConnection: (String) -> Unit,
     onIndexaTokenChange: (String) -> Unit,
     onTestIndexaConnection: () -> Unit,
     onConnectIndexa: () -> Unit,
     onRunIndexaSync: () -> Unit,
+    onRequestDisconnectConnection: (String) -> Unit,
+    onConfirmDisconnectConnection: () -> Unit,
+    onDismissDisconnectDialog: () -> Unit,
     onNameChange: (String) -> Unit,
     onKindSelected: (CategoryKind) -> Unit,
     onSaveCategory: () -> Unit,
@@ -70,10 +74,12 @@ fun SettingsScreen(
         item {
             ConnectionsOverviewCard(
                 uiState = uiState,
+                onSelectConnection = onSelectConnection,
                 onIndexaTokenChange = onIndexaTokenChange,
                 onTestIndexaConnection = onTestIndexaConnection,
                 onConnectIndexa = onConnectIndexa,
                 onRunIndexaSync = onRunIndexaSync,
+                onRequestDisconnectConnection = onRequestDisconnectConnection,
             )
         }
 
@@ -159,6 +165,36 @@ fun SettingsScreen(
                 TextButton(
                     onClick = onDismissDeleteDialog,
                     enabled = !uiState.isBusy,
+                ) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
+
+    if (uiState.disconnectConfirmationConnectionId != null) {
+        AlertDialog(
+            onDismissRequest = onDismissDisconnectDialog,
+            title = {
+                Text("Disconnect provider?")
+            },
+            text = {
+                Text(
+                    "Disconnect ${uiState.disconnectConfirmationConnectionName ?: "this connection"}? Imported local accounts, holdings, and transactions will stay in the ledger, but future syncs will stop until you reconnect.",
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = onConfirmDisconnectConnection,
+                    enabled = uiState.pendingDisconnectConnectionId == null,
+                ) {
+                    Text(if (uiState.pendingDisconnectConnectionId != null) "Disconnecting..." else "Disconnect")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = onDismissDisconnectDialog,
+                    enabled = uiState.pendingDisconnectConnectionId == null,
                 ) {
                     Text("Cancel")
                 }

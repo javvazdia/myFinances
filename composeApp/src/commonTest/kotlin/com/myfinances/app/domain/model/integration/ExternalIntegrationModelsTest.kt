@@ -6,12 +6,12 @@ import kotlin.test.assertTrue
 
 class ExternalIntegrationModelsTest {
     @Test
-    fun providerCatalogIncludesIndexaAsScaffoldedProvider() {
+    fun providerCatalogIncludesIndexaAsActiveProvider() {
         val indexa = ExternalProviderCatalog.availableProviders.first { provider ->
             provider.id == ExternalProviderId.INDEXA
         }
 
-        assertEquals(ExternalIntegrationStage.SCAFFOLDED, indexa.stage)
+        assertEquals(ExternalIntegrationStage.ACTIVE, indexa.stage)
         assertTrue(indexa.capabilities.contains(ExternalProviderCapability.ACCOUNT_DISCOVERY))
         assertTrue(indexa.capabilities.contains(ExternalProviderCapability.HOLDINGS_SYNC))
     }

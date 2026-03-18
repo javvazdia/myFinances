@@ -93,7 +93,7 @@ object ExternalProviderCatalog {
                 ExternalProviderCapability.PERFORMANCE_SYNC,
                 ExternalProviderCapability.MANUAL_SYNC,
             ),
-            stage = ExternalIntegrationStage.SCAFFOLDED,
+            stage = ExternalIntegrationStage.ACTIVE,
         ),
     )
 }
