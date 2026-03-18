@@ -6,6 +6,7 @@ import com.myfinances.app.domain.model.Account
 import com.myfinances.app.domain.model.Category
 import com.myfinances.app.domain.model.CategoryKind
 import com.myfinances.app.domain.model.FinanceTransaction
+import com.myfinances.app.domain.model.InvestmentPosition
 import com.myfinances.app.domain.model.integration.ExternalProviderId
 import com.myfinances.app.domain.model.integration.ExternalSyncStatus
 import com.myfinances.app.domain.repository.LedgerRepository
@@ -71,6 +72,7 @@ class StubIndexaIntegrationServiceTest {
 
         assertEquals(ExternalSyncStatus.SUCCESS, syncRun.status)
         assertEquals(1, syncRun.importedAccounts)
+        assertEquals(1, syncRun.importedPositions)
         assertEquals(1, importedAccounts.size)
         assertEquals("Indexa Capital", importedAccounts.first().sourceProvider)
         assertEquals(ExternalSyncStatus.SUCCESS, updatedConnection.lastSyncStatus)
@@ -80,8 +82,12 @@ class StubIndexaIntegrationServiceTest {
 
 private class FakeLedgerRepository : LedgerRepository {
     private val accounts = MutableStateFlow<List<Account>>(emptyList())
+    private val positionsByAccount = mutableMapOf<String, MutableStateFlow<List<InvestmentPosition>>>()
 
     override fun observeAccounts(includeArchived: Boolean): Flow<List<Account>> = accounts
+
+    override fun observeInvestmentPositions(accountId: String): Flow<List<InvestmentPosition>> =
+        positionsByAccount.getOrPut(accountId) { MutableStateFlow(emptyList()) }
 
     override fun observeCategories(): Flow<List<Category>> = MutableStateFlow(emptyList())
 
@@ -101,9 +107,18 @@ private class FakeLedgerRepository : LedgerRepository {
             .plus(account)
     }
 
+    override suspend fun replaceInvestmentPositions(
+        accountId: String,
+        positions: List<InvestmentPosition>,
+    ) {
+        positionsByAccount.getOrPut(accountId) { MutableStateFlow(emptyList()) }.value = positions
+    }
+
     override suspend fun upsertCategory(category: Category) = Unit
 
     override suspend fun upsertTransaction(transaction: FinanceTransaction) = Unit
+
+    override suspend fun deleteAccount(accountId: String) = Unit
 
     override suspend fun deleteCategory(categoryId: String) = Unit
 

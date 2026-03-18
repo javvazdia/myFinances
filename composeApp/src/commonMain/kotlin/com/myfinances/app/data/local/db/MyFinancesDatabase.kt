@@ -13,12 +13,14 @@ import com.myfinances.app.data.local.dao.CategoryDao
 import com.myfinances.app.data.local.dao.ExternalAccountLinksDao
 import com.myfinances.app.data.local.dao.ExternalConnectionsDao
 import com.myfinances.app.data.local.dao.ExternalSyncRunsDao
+import com.myfinances.app.data.local.dao.InvestmentPositionDao
 import com.myfinances.app.data.local.dao.TransactionDao
 import com.myfinances.app.data.local.entity.AccountEntity
 import com.myfinances.app.data.local.entity.CategoryEntity
 import com.myfinances.app.data.local.entity.ExternalAccountLinkEntity
 import com.myfinances.app.data.local.entity.ExternalConnectionEntity
 import com.myfinances.app.data.local.entity.ExternalSyncRunEntity
+import com.myfinances.app.data.local.entity.InvestmentPositionEntity
 import com.myfinances.app.data.local.entity.TransactionEntity
 
 const val MY_FINANCES_DB_NAME = "my_finances.db"
@@ -30,9 +32,10 @@ const val MY_FINANCES_DB_NAME = "my_finances.db"
         ExternalConnectionEntity::class,
         ExternalAccountLinkEntity::class,
         ExternalSyncRunEntity::class,
+        InvestmentPositionEntity::class,
         TransactionEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = true,
 )
 @TypeConverters(FinanceTypeConverters::class)
@@ -47,6 +50,8 @@ abstract class MyFinancesDatabase : RoomDatabase() {
     abstract fun externalAccountLinksDao(): ExternalAccountLinksDao
 
     abstract fun externalSyncRunsDao(): ExternalSyncRunsDao
+
+    abstract fun investmentPositionDao(): InvestmentPositionDao
 
     abstract fun transactionDao(): TransactionDao
 }
@@ -121,6 +126,39 @@ val MIGRATION_1_TO_2: Migration = object : Migration(1, 2) {
         )
         connection.execSQL(
             "CREATE INDEX IF NOT EXISTS index_external_sync_runs_started_at_epoch_ms ON external_sync_runs(started_at_epoch_ms)",
+        )
+    }
+}
+
+val MIGRATION_2_TO_3: Migration = object : Migration(2, 3) {
+    override fun migrate(connection: SQLiteConnection) {
+        connection.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS investment_positions (
+                id TEXT NOT NULL PRIMARY KEY,
+                account_id TEXT NOT NULL,
+                provider_account_id TEXT NOT NULL,
+                instrument_isin TEXT,
+                instrument_name TEXT NOT NULL,
+                asset_class TEXT,
+                titles REAL,
+                price REAL,
+                market_value_minor INTEGER,
+                cost_amount_minor INTEGER,
+                valuation_date TEXT,
+                updated_at_epoch_ms INTEGER NOT NULL,
+                FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE
+            )
+            """.trimIndent(),
+        )
+        connection.execSQL(
+            "CREATE INDEX IF NOT EXISTS index_investment_positions_account_id ON investment_positions(account_id)",
+        )
+        connection.execSQL(
+            "CREATE INDEX IF NOT EXISTS index_investment_positions_provider_account_id ON investment_positions(provider_account_id)",
+        )
+        connection.execSQL(
+            "CREATE INDEX IF NOT EXISTS index_investment_positions_instrument_isin ON investment_positions(instrument_isin)",
         )
     }
 }

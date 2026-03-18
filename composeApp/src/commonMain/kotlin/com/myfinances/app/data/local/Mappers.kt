@@ -5,10 +5,12 @@ import com.myfinances.app.data.local.entity.CategoryEntity
 import com.myfinances.app.data.local.entity.ExternalAccountLinkEntity
 import com.myfinances.app.data.local.entity.ExternalConnectionEntity
 import com.myfinances.app.data.local.entity.ExternalSyncRunEntity
+import com.myfinances.app.data.local.entity.InvestmentPositionEntity
 import com.myfinances.app.data.local.entity.TransactionEntity
 import com.myfinances.app.domain.model.Account
 import com.myfinances.app.domain.model.Category
 import com.myfinances.app.domain.model.FinanceTransaction
+import com.myfinances.app.domain.model.InvestmentPosition
 import com.myfinances.app.domain.model.integration.ExternalAccountLink
 import com.myfinances.app.domain.model.integration.ExternalConnection
 import com.myfinances.app.domain.model.integration.ExternalSyncRun
@@ -99,6 +101,38 @@ object TransactionEntityMapper {
         externalTransactionId = model.externalTransactionId,
         postedAtEpochMs = model.postedAtEpochMs,
         createdAtEpochMs = model.createdAtEpochMs,
+        updatedAtEpochMs = model.updatedAtEpochMs,
+    )
+}
+
+object InvestmentPositionEntityMapper {
+    fun toDomain(entity: InvestmentPositionEntity): InvestmentPosition = InvestmentPosition(
+        id = entity.id,
+        accountId = entity.accountId,
+        providerAccountId = entity.providerAccountId,
+        instrumentIsin = entity.instrumentIsin,
+        instrumentName = entity.instrumentName,
+        assetClass = entity.assetClass,
+        titles = entity.titles,
+        price = entity.price,
+        marketValueMinor = entity.marketValueMinor,
+        costAmountMinor = entity.costAmountMinor,
+        valuationDate = entity.valuationDate,
+        updatedAtEpochMs = entity.updatedAtEpochMs,
+    )
+
+    fun toEntity(model: InvestmentPosition): InvestmentPositionEntity = InvestmentPositionEntity(
+        id = model.id,
+        accountId = model.accountId,
+        providerAccountId = model.providerAccountId,
+        instrumentIsin = model.instrumentIsin,
+        instrumentName = model.instrumentName,
+        assetClass = model.assetClass,
+        titles = model.titles,
+        price = model.price,
+        marketValueMinor = model.marketValueMinor,
+        costAmountMinor = model.costAmountMinor,
+        valuationDate = model.valuationDate,
         updatedAtEpochMs = model.updatedAtEpochMs,
     )
 }

@@ -69,6 +69,8 @@ fun TransactionsRoute(
     val uiState by transactionsViewModel.uiState.collectAsState()
     TransactionsScreen(
         uiState = uiState,
+        onShowCreateForm = transactionsViewModel::showCreateForm,
+        onHideTransactionForm = transactionsViewModel::hideTransactionForm,
         onTypeSelected = transactionsViewModel::onTypeSelected,
         onAccountSelected = transactionsViewModel::onAccountSelected,
         onCategorySelected = transactionsViewModel::onCategorySelected,
@@ -80,13 +82,14 @@ fun TransactionsRoute(
         onRequestDeleteTransaction = transactionsViewModel::requestDeleteTransaction,
         onConfirmDeleteTransaction = transactionsViewModel::confirmDeleteTransaction,
         onDismissDeleteDialog = transactionsViewModel::dismissDeleteDialog,
-        onCancelEditing = transactionsViewModel::cancelEditing,
     )
 }
 
 @Composable
 fun TransactionsScreen(
     uiState: TransactionsUiState,
+    onShowCreateForm: () -> Unit,
+    onHideTransactionForm: () -> Unit,
     onTypeSelected: (TransactionType) -> Unit,
     onAccountSelected: (String) -> Unit,
     onCategorySelected: (String) -> Unit,
@@ -98,13 +101,12 @@ fun TransactionsScreen(
     onRequestDeleteTransaction: (String) -> Unit,
     onConfirmDeleteTransaction: () -> Unit,
     onDismissDeleteDialog: () -> Unit,
-    onCancelEditing: () -> Unit,
 ) {
     val listState = rememberLazyListState()
 
     LaunchedEffect(uiState.editingTransactionId) {
         if (uiState.editingTransactionId != null) {
-            listState.animateScrollToItem(index = 2)
+            listState.animateScrollToItem(index = 3)
         }
     }
 
@@ -131,17 +133,27 @@ fun TransactionsScreen(
         }
 
         item {
-            TransactionFormCard(
+            TransactionActionsCard(
                 uiState = uiState,
-                onTypeSelected = onTypeSelected,
-                onAccountSelected = onAccountSelected,
-                onCategorySelected = onCategorySelected,
-                onAmountChange = onAmountChange,
-                onMerchantChange = onMerchantChange,
-                onNoteChange = onNoteChange,
-                onSaveTransaction = onSaveTransaction,
-                onCancelEditing = onCancelEditing,
+                onShowCreateForm = onShowCreateForm,
+                onHideTransactionForm = onHideTransactionForm,
             )
+        }
+
+        if (uiState.isFormVisible) {
+            item {
+                TransactionFormCard(
+                    uiState = uiState,
+                    onTypeSelected = onTypeSelected,
+                    onAccountSelected = onAccountSelected,
+                    onCategorySelected = onCategorySelected,
+                    onAmountChange = onAmountChange,
+                    onMerchantChange = onMerchantChange,
+                    onNoteChange = onNoteChange,
+                    onSaveTransaction = onSaveTransaction,
+                    onCancelEditing = onHideTransactionForm,
+                )
+            }
         }
 
         item {
@@ -156,7 +168,7 @@ fun TransactionsScreen(
             item {
                 Card {
                     Text(
-                        text = "No transactions yet. Create one above and it will appear here immediately.",
+                        text = "No transactions yet. Click Create transaction to add one.",
                         modifier = Modifier.padding(20.dp),
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -206,6 +218,38 @@ fun TransactionsScreen(
                 }
             },
         )
+    }
+}
+
+@Composable
+private fun TransactionActionsCard(
+    uiState: TransactionsUiState,
+    onShowCreateForm: () -> Unit,
+    onHideTransactionForm: () -> Unit,
+) {
+    Card {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            if (!uiState.isFormVisible) {
+                Button(
+                    onClick = onShowCreateForm,
+                    enabled = !uiState.isBusy,
+                ) {
+                    Text("Create transaction")
+                }
+            } else {
+                Button(
+                    onClick = onHideTransactionForm,
+                    enabled = !uiState.isBusy,
+                ) {
+                    Text(if (uiState.isEditing) "Cancel editing" else "Hide form")
+                }
+            }
+        }
     }
 }
 
@@ -507,6 +551,7 @@ data class TransactionsUiState(
     val categories: List<Category> = emptyList(),
     val transactions: List<FinanceTransaction> = emptyList(),
     val recentTransactions: List<TransactionCardUiModel> = emptyList(),
+    val isFormVisible: Boolean = false,
     val selectedType: TransactionType = TransactionType.EXPENSE,
     val selectedAccountId: String? = null,
     val selectedCategoryId: String? = null,
@@ -623,6 +668,27 @@ class TransactionsViewModel(
         }
     }
 
+    fun showCreateForm() {
+        _uiState.update { currentState ->
+            currentState.toCreateMode().copy(
+                isFormVisible = true,
+                selectedType = currentState.selectedType,
+                selectedAccountId = currentState.selectedAccountId,
+                selectedCategoryId = currentState.selectedCategoryId,
+            )
+        }
+    }
+
+    fun hideTransactionForm() {
+        _uiState.update { currentState ->
+            currentState.toCreateMode().copy(
+                selectedType = currentState.selectedType,
+                selectedAccountId = currentState.selectedAccountId,
+                selectedCategoryId = currentState.selectedCategoryId,
+            )
+        }
+    }
+
     fun onTypeSelected(value: TransactionType) {
         _uiState.update { currentState ->
             val availableCategories = currentState.categories.filter { category ->
@@ -691,6 +757,7 @@ class TransactionsViewModel(
             }
 
             currentState.copy(
+                isFormVisible = true,
                 selectedType = transaction.type,
                 selectedAccountId = transaction.accountId,
                 selectedCategoryId = transaction.categoryId
@@ -710,9 +777,7 @@ class TransactionsViewModel(
     }
 
     fun cancelEditing() {
-        _uiState.update { currentState ->
-            currentState.toCreateMode()
-        }
+        hideTransactionForm()
     }
 
     fun saveTransaction() {
@@ -814,7 +879,11 @@ class TransactionsViewModel(
 
             _uiState.update { currentState ->
                 if (currentState.editingTransactionId == transactionId) {
-                    currentState.toCreateMode()
+                    currentState.toCreateMode().copy(
+                        selectedType = currentState.selectedType,
+                        selectedAccountId = currentState.selectedAccountId,
+                        selectedCategoryId = currentState.selectedCategoryId,
+                    )
                 } else {
                     currentState.copy(
                         pendingDeleteTransactionId = null,
@@ -907,6 +976,7 @@ private fun TransactionsUiState.toCreateMode(): TransactionsUiState =
         draftAmount = "",
         draftMerchant = "",
         draftNote = "",
+        isFormVisible = false,
         editingTransactionId = null,
         deleteConfirmationTransactionId = null,
         isSaving = false,

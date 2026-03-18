@@ -3,6 +3,7 @@ package com.myfinances.app.integrations.indexa.sync
 import com.myfinances.app.domain.model.Account
 import com.myfinances.app.domain.model.AccountSourceType
 import com.myfinances.app.domain.model.AccountType
+import com.myfinances.app.domain.model.InvestmentPosition
 import com.myfinances.app.domain.model.integration.ExternalAccountLink
 import com.myfinances.app.domain.model.integration.ExternalConnection
 import com.myfinances.app.domain.model.integration.ExternalConnectionStatus
@@ -15,6 +16,8 @@ import com.myfinances.app.domain.repository.LedgerRepository
 import com.myfinances.app.integrations.indexa.api.IndexaApiClient
 import com.myfinances.app.integrations.indexa.model.IndexaAccountSummary
 import com.myfinances.app.integrations.indexa.model.IndexaConnectionPreview
+import com.myfinances.app.integrations.indexa.model.IndexaPortfolioSnapshot
+import com.myfinances.app.integrations.indexa.model.IndexaPortfolioPosition
 import kotlinx.coroutines.flow.first
 import kotlin.math.roundToLong
 import kotlin.random.Random
@@ -108,6 +111,7 @@ class StubIndexaIntegrationService(
             val existingAccounts = ledgerRepository.observeAccounts(includeArchived = true).first()
             val existingLinks = externalConnectionsRepository.observeAccountLinks(connectionId).first()
             val importedAt = Clock.System.now().toEpochMilliseconds()
+            var importedPositionsCount = 0
 
             val updatedLinks = providerAccounts.mapIndexed { index, providerAccount ->
                 val existingLink = existingLinks.firstOrNull { link ->
@@ -120,14 +124,27 @@ class StubIndexaIntegrationService(
                 )
                 val localAccountId = existingAccount?.id
                     ?: buildSyncedAccountId(providerAccount.accountNumber, importedAt, index)
-
-                ledgerRepository.upsertAccount(
-                    providerAccount.toLocalAccount(
-                        localAccountId = localAccountId,
-                        existingAccount = existingAccount,
-                        syncedAtEpochMs = importedAt,
-                    ),
+                val portfolio = apiClient.fetchPortfolio(
+                    accessToken = accessToken,
+                    accountNumber = providerAccount.accountNumber,
                 )
+                val updatedAccount = providerAccount.toLocalAccount(
+                    localAccountId = localAccountId,
+                    existingAccount = existingAccount,
+                    syncedAtEpochMs = importedAt,
+                    portfolio = portfolio,
+                )
+                val positions = portfolio.toInvestmentPositions(
+                    localAccountId = localAccountId,
+                    syncedAtEpochMs = importedAt,
+                )
+
+                ledgerRepository.upsertAccount(updatedAccount)
+                ledgerRepository.replaceInvestmentPositions(
+                    accountId = localAccountId,
+                    positions = positions,
+                )
+                importedPositionsCount += positions.size
 
                 ExternalAccountLink(
                     connectionId = connectionId,
@@ -165,8 +182,11 @@ class StubIndexaIntegrationService(
                 status = ExternalSyncStatus.SUCCESS,
                 importedAccounts = updatedLinks.size,
                 importedTransactions = 0,
-                importedPositions = 0,
-                message = buildSyncSuccessMessage(updatedLinks.size),
+                importedPositions = importedPositionsCount,
+                message = buildSyncSuccessMessage(
+                    importedAccounts = updatedLinks.size,
+                    importedPositions = importedPositionsCount,
+                ),
             )
 
             externalConnectionsRepository.upsertConnection(successfulConnection)
@@ -228,6 +248,7 @@ private fun IndexaAccountSummary.toLocalAccount(
     localAccountId: String,
     existingAccount: Account?,
     syncedAtEpochMs: Long,
+    portfolio: IndexaPortfolioSnapshot?,
 ): Account = Account(
     id = localAccountId,
     name = displayName,
@@ -235,7 +256,8 @@ private fun IndexaAccountSummary.toLocalAccount(
     currencyCode = normalizeIndexaCurrencyCode(currencyCode)
         ?: existingAccount?.currencyCode
         ?: DEFAULT_INDEXA_CURRENCY_CODE,
-    openingBalanceMinor = currentValuation.toMinorAmount()
+    openingBalanceMinor = portfolio?.totalMarketValue.toMinorAmount()
+        ?: currentValuation.toMinorAmount()
         ?: existingAccount?.openingBalanceMinor
         ?: 0L,
     sourceType = AccountSourceType.API_SYNC,
@@ -268,7 +290,67 @@ private fun buildSyncedAccountId(
     index: Int,
 ): String = "account-indexa-${providerAccountId.lowercase()}-$timestampMs-$index"
 
-private fun buildSyncSuccessMessage(importedAccounts: Int): String {
+private fun IndexaPortfolioSnapshot.toInvestmentPositions(
+    localAccountId: String,
+    syncedAtEpochMs: Long,
+): List<InvestmentPosition> = positions.mapIndexed { index, position ->
+    position.toInvestmentPosition(
+        accountId = localAccountId,
+        providerAccountId = accountNumber,
+        valuationDate = valuationDate,
+        syncedAtEpochMs = syncedAtEpochMs,
+        index = index,
+    )
+}
+
+private fun IndexaPortfolioPosition.toInvestmentPosition(
+    accountId: String,
+    providerAccountId: String,
+    valuationDate: String?,
+    syncedAtEpochMs: Long,
+    index: Int,
+): InvestmentPosition = InvestmentPosition(
+    id = buildInvestmentPositionId(
+        accountId = accountId,
+        instrumentIsin = isin,
+        instrumentName = name,
+        index = index,
+    ),
+    accountId = accountId,
+    providerAccountId = providerAccountId,
+    instrumentIsin = isin,
+    instrumentName = name,
+    assetClass = assetClass,
+    titles = titles,
+    price = price,
+    marketValueMinor = marketValue.toMinorAmount(),
+    costAmountMinor = costAmount.toMinorAmount(),
+    valuationDate = valuationDate,
+    updatedAtEpochMs = syncedAtEpochMs,
+)
+
+private fun buildSyncSuccessMessage(
+    importedAccounts: Int,
+    importedPositions: Int,
+): String {
     val accountLabel = if (importedAccounts == 1) "account" else "accounts"
-    return "Imported $importedAccounts Indexa $accountLabel into the local ledger. Holdings and transaction sync are next."
+    val positionLabel = if (importedPositions == 1) "position" else "positions"
+    return "Imported $importedAccounts Indexa $accountLabel and $importedPositions portfolio $positionLabel into the local ledger."
+}
+
+private fun buildInvestmentPositionId(
+    accountId: String,
+    instrumentIsin: String?,
+    instrumentName: String,
+    index: Int,
+): String {
+    val identifier = instrumentIsin?.takeIf(String::isNotBlank) ?: instrumentName
+    val slug = identifier
+        .trim()
+        .lowercase()
+        .replace(Regex("[^a-z0-9]+"), "-")
+        .trim('-')
+        .ifBlank { "position" }
+
+    return "position-$accountId-$slug-$index"
 }

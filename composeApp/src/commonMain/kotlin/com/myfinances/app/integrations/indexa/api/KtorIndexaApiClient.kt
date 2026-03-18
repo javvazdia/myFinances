@@ -3,6 +3,7 @@ package com.myfinances.app.integrations.indexa.api
 import com.myfinances.app.integrations.indexa.model.IndexaAccountSummary
 import com.myfinances.app.integrations.indexa.model.IndexaCashTransaction
 import com.myfinances.app.integrations.indexa.model.IndexaInstrumentTransaction
+import com.myfinances.app.integrations.indexa.model.IndexaPortfolioPosition
 import com.myfinances.app.integrations.indexa.model.IndexaPortfolioSnapshot
 import com.myfinances.app.integrations.indexa.model.IndexaUserProfile
 import io.ktor.client.HttpClient
@@ -72,8 +73,31 @@ class KtorIndexaApiClient(
         accessToken: String,
         accountNumber: String,
     ): IndexaPortfolioSnapshot {
-        throw UnsupportedOperationException(
-            "Live portfolio sync is the next implementation step after connection setup.",
+        val response = httpClient.get {
+            url("$INDEXA_API_BASE_URL/accounts/$accountNumber/portfolio")
+            header(INDEXA_AUTH_HEADER, accessToken)
+            header(HttpHeaders.Accept, ContentType.Application.Json.toString())
+        }.body<IndexaPortfolioResponse>()
+
+        return IndexaPortfolioSnapshot(
+            accountNumber = response.portfolio?.accountNumber ?: accountNumber,
+            valuationDate = response.portfolio?.date,
+            totalMarketValue = response.portfolio?.totalAmount,
+            positions = response.instrumentAccounts
+                .orEmpty()
+                .flatMap { account ->
+                    account.positions.orEmpty().map { position ->
+                        IndexaPortfolioPosition(
+                            isin = position.instrument?.isinCode,
+                            name = position.instrument?.name ?: "Unknown instrument",
+                            assetClass = position.instrument?.assetClass,
+                            titles = position.titles,
+                            price = position.price,
+                            marketValue = position.amount,
+                            costAmount = null,
+                        )
+                    }
+                },
         )
     }
 
@@ -130,4 +154,42 @@ private data class IndexaAccountResponse(
     val accountNumber: String,
     val status: String? = null,
     val type: String? = null,
+)
+
+@Serializable
+private data class IndexaPortfolioResponse(
+    val portfolio: IndexaPortfolioSummaryResponse? = null,
+    @SerialName("instrument_accounts")
+    val instrumentAccounts: List<IndexaInstrumentAccountResponse>? = null,
+)
+
+@Serializable
+private data class IndexaPortfolioSummaryResponse(
+    @SerialName("account_number")
+    val accountNumber: String? = null,
+    val date: String? = null,
+    @SerialName("total_amount")
+    val totalAmount: Double? = null,
+)
+
+@Serializable
+private data class IndexaInstrumentAccountResponse(
+    val positions: List<IndexaInstrumentPositionResponse>? = null,
+)
+
+@Serializable
+private data class IndexaInstrumentPositionResponse(
+    val amount: Double? = null,
+    val price: Double? = null,
+    val titles: Double? = null,
+    val instrument: IndexaInstrumentResponse? = null,
+)
+
+@Serializable
+private data class IndexaInstrumentResponse(
+    @SerialName("isin_code")
+    val isinCode: String? = null,
+    val name: String? = null,
+    @SerialName("asset_class")
+    val assetClass: String? = null,
 )

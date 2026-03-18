@@ -4,10 +4,13 @@ import com.myfinances.app.domain.model.Account
 import com.myfinances.app.domain.model.Category
 import com.myfinances.app.domain.model.CategoryKind
 import com.myfinances.app.domain.model.FinanceTransaction
+import com.myfinances.app.domain.model.InvestmentPosition
 import kotlinx.coroutines.flow.Flow
 
 interface LedgerRepository {
     fun observeAccounts(includeArchived: Boolean = false): Flow<List<Account>>
+
+    fun observeInvestmentPositions(accountId: String): Flow<List<InvestmentPosition>>
 
     fun observeCategories(): Flow<List<Category>>
 
@@ -21,9 +24,16 @@ interface LedgerRepository {
 
     suspend fun upsertAccount(account: Account)
 
+    suspend fun replaceInvestmentPositions(
+        accountId: String,
+        positions: List<InvestmentPosition>,
+    )
+
     suspend fun upsertCategory(category: Category)
 
     suspend fun upsertTransaction(transaction: FinanceTransaction)
+
+    suspend fun deleteAccount(accountId: String)
 
     suspend fun deleteCategory(categoryId: String)
 

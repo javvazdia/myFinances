@@ -5,6 +5,7 @@ import com.myfinances.app.domain.model.Account
 import com.myfinances.app.domain.model.Category
 import com.myfinances.app.domain.model.CategoryKind
 import com.myfinances.app.domain.model.FinanceTransaction
+import com.myfinances.app.domain.model.InvestmentPosition
 import com.myfinances.app.domain.repository.LedgerRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -21,6 +22,11 @@ class LocalLedgerRepository(
 
         return source.map { accounts -> accounts.map(AccountEntityMapper::toDomain) }
     }
+
+    override fun observeInvestmentPositions(accountId: String): Flow<List<InvestmentPosition>> =
+        database.investmentPositionDao()
+            .observePositionsForAccount(accountId)
+            .map { positions -> positions.map(InvestmentPositionEntityMapper::toDomain) }
 
     override fun observeCategories(): Flow<List<Category>> =
         database.categoryDao()
@@ -51,12 +57,29 @@ class LocalLedgerRepository(
         database.accountDao().upsertAccount(AccountEntityMapper.toEntity(account))
     }
 
+    override suspend fun replaceInvestmentPositions(
+        accountId: String,
+        positions: List<InvestmentPosition>,
+    ) {
+        database.investmentPositionDao().deletePositionsForAccount(accountId)
+        if (positions.isNotEmpty()) {
+            database.investmentPositionDao()
+                .upsertPositions(positions.map(InvestmentPositionEntityMapper::toEntity))
+        }
+    }
+
     override suspend fun upsertCategory(category: Category) {
         database.categoryDao().upsertCategory(CategoryEntityMapper.toEntity(category))
     }
 
     override suspend fun upsertTransaction(transaction: FinanceTransaction) {
         database.transactionDao().upsertTransaction(TransactionEntityMapper.toEntity(transaction))
+    }
+
+    override suspend fun deleteAccount(accountId: String) {
+        database.accountDao().getAccountById(accountId)?.let { account ->
+            database.accountDao().deleteAccount(account)
+        }
     }
 
     override suspend fun deleteCategory(categoryId: String) {
