@@ -8,6 +8,7 @@ import com.myfinances.app.domain.model.FinanceTransaction
 import com.myfinances.app.domain.model.InvestmentPosition
 import com.myfinances.app.domain.model.TransactionType
 import com.myfinances.app.integrations.indexa.model.IndexaPerformanceHistory
+import kotlinx.datetime.atStartOfDayIn
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -213,4 +214,63 @@ class AccountsScreenTest {
         assertEquals(12400.0, chart?.points?.first()?.value)
         assertEquals(12650.0, chart?.points?.last()?.value)
     }
+
+    @Test
+    fun filtersHistoryPointsBySelectedRange() {
+        val points = listOf(
+            AccountHistoryPoint(
+                axisLabel = "Jan 1",
+                detailLabel = "Jan 1, 2025",
+                timestampEpochMs = parseTestEpoch("2025-01-01"),
+                value = 100.0,
+            ),
+            AccountHistoryPoint(
+                axisLabel = "May 1",
+                detailLabel = "May 1, 2025",
+                timestampEpochMs = parseTestEpoch("2025-05-01"),
+                value = 130.0,
+            ),
+            AccountHistoryPoint(
+                axisLabel = "Jun 1",
+                detailLabel = "Jun 1, 2025",
+                timestampEpochMs = parseTestEpoch("2025-06-01"),
+                value = 140.0,
+            ),
+        )
+
+        val filtered = filterHistoryPointsByRange(
+            points = points,
+            range = AccountHistoryRange.ONE_MONTH,
+        )
+
+        assertEquals(2, filtered.size)
+        assertEquals("May 1, 2025", filtered.first().detailLabel)
+        assertEquals("Jun 1, 2025", filtered.last().detailLabel)
+    }
+
+    @Test
+    fun parsesIsoDateTimeStringsForHistoryFiltering() {
+        val charts = buildIndexaHistoryCharts(
+            history = IndexaPerformanceHistory(
+                accountNumber = "INDEXA01",
+                valueHistory = mapOf(
+                    "2025-01-01T00:00:00Z" to 100.0,
+                    "2025-06-01T00:00:00Z" to 140.0,
+                ),
+                normalizedHistory = emptyMap(),
+            ),
+            currencyCode = "EUR",
+            currentBalanceMinor = 14_000L,
+        )
+
+        val filtered = charts.getValue(AccountHistoryMode.VALUE).filteredBy(AccountHistoryRange.ONE_MONTH)
+
+        assertEquals(1, filtered.points.size)
+        assertEquals("Jun 1, 2025", filtered.points.single().detailLabel)
+    }
 }
+
+private fun parseTestEpoch(isoDate: String): Long =
+    kotlinx.datetime.LocalDate.parse(isoDate)
+        .atStartOfDayIn(kotlinx.datetime.TimeZone.UTC)
+        .toEpochMilliseconds()

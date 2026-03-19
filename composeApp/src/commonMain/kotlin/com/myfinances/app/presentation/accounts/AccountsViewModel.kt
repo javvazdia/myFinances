@@ -25,8 +25,11 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.datetime.DatePeriod
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
+import kotlinx.datetime.atStartOfDayIn
+import kotlinx.datetime.minus
 import kotlinx.datetime.toLocalDateTime
 import kotlin.random.Random
 import kotlin.time.Clock
@@ -39,6 +42,7 @@ data class AccountsUiState(
     val selectedInvestmentPositions: List<InvestmentPosition> = emptyList(),
     val accountHistoryCharts: Map<AccountHistoryMode, AccountHistoryChart> = emptyMap(),
     val selectedAccountHistoryMode: AccountHistoryMode = AccountHistoryMode.VALUE,
+    val selectedAccountHistoryRange: AccountHistoryRange = AccountHistoryRange.ALL,
     val isLoadingAccountHistory: Boolean = false,
     val accountHistoryErrorMessage: String? = null,
     val draftName: String = "",
@@ -74,8 +78,11 @@ data class AccountsUiState(
 
     val selectedAccountHistoryChart: AccountHistoryChart?
         get() = accountHistoryCharts[selectedAccountHistoryMode]
+            ?.filteredBy(selectedAccountHistoryRange)
             ?: accountHistoryCharts[AccountHistoryMode.VALUE]
+                ?.filteredBy(selectedAccountHistoryRange)
             ?: accountHistoryCharts.values.firstOrNull()
+                ?.filteredBy(selectedAccountHistoryRange)
 
     val availableAccountHistoryModes: List<AccountHistoryMode>
         get() = AccountHistoryMode.entries.filter(accountHistoryCharts::containsKey)
@@ -93,18 +100,36 @@ enum class AccountHistoryMode {
     SNAPSHOTS,
 }
 
+enum class AccountHistoryRange {
+    ONE_MONTH,
+    THREE_MONTHS,
+    SIX_MONTHS,
+    ONE_YEAR,
+    THREE_YEARS,
+    ALL,
+}
+
 data class AccountHistoryChart(
     val title: String,
     val subtitle: String,
     val points: List<AccountHistoryPoint>,
+    val valueFormat: AccountHistoryValueFormat,
+    val currencyCode: String? = null,
     val minimumLabel: String,
     val maximumLabel: String,
     val startLabel: String,
     val endLabel: String,
 )
 
+enum class AccountHistoryValueFormat {
+    MONEY,
+    PERFORMANCE_PERCENT,
+}
+
 data class AccountHistoryPoint(
-    val label: String,
+    val axisLabel: String,
+    val detailLabel: String,
+    val timestampEpochMs: Long,
     val value: Double,
 )
 
@@ -159,6 +184,7 @@ class AccountsViewModel(
                             selectedInvestmentPositions = emptyList(),
                             accountHistoryCharts = emptyMap(),
                             selectedAccountHistoryMode = AccountHistoryMode.VALUE,
+                            selectedAccountHistoryRange = AccountHistoryRange.ALL,
                             isLoadingAccountHistory = false,
                             accountHistoryErrorMessage = null,
                         )
@@ -236,6 +262,12 @@ class AccountsViewModel(
         }
     }
 
+    fun selectAccountHistoryRange(range: AccountHistoryRange) {
+        _uiState.update { currentState ->
+            currentState.copy(selectedAccountHistoryRange = range)
+        }
+    }
+
     fun saveAccount() {
         val snapshot = uiState.value
         val existingAccount = snapshot.editingAccount
@@ -300,6 +332,7 @@ class AccountsViewModel(
                 selectedAccountId = accountId,
                 accountHistoryCharts = emptyMap(),
                 selectedAccountHistoryMode = AccountHistoryMode.VALUE,
+                selectedAccountHistoryRange = AccountHistoryRange.ALL,
                 isLoadingAccountHistory = false,
                 accountHistoryErrorMessage = null,
                 draftCurrencyCode = currentState.draftCurrencyCode,
@@ -377,6 +410,7 @@ class AccountsViewModel(
                 selectedInvestmentPositions = emptyList(),
                 accountHistoryCharts = emptyMap(),
                 selectedAccountHistoryMode = AccountHistoryMode.VALUE,
+                selectedAccountHistoryRange = AccountHistoryRange.ALL,
                 isLoadingAccountHistory = false,
                 accountHistoryErrorMessage = null,
             )
@@ -461,6 +495,7 @@ class AccountsViewModel(
                     accountHistoryErrorMessage = null,
                     accountHistoryCharts = emptyMap(),
                     selectedAccountHistoryMode = AccountHistoryMode.VALUE,
+                    selectedAccountHistoryRange = AccountHistoryRange.ALL,
                 )
             }
 
@@ -668,7 +703,9 @@ internal fun buildLocalAccountHistoryChart(
     val points = buildList {
         add(
             AccountHistoryPoint(
-                label = formatHistoryDate(startingPointEpochMs),
+                axisLabel = formatHistoryDate(startingPointEpochMs),
+                detailLabel = formatHistoryDetailDate(startingPointEpochMs),
+                timestampEpochMs = startingPointEpochMs,
                 value = runningBalanceMinor.toDouble() / 100.0,
             ),
         )
@@ -676,7 +713,9 @@ internal fun buildLocalAccountHistoryChart(
             runningBalanceMinor += transaction.balanceDeltaMinor()
             add(
                 AccountHistoryPoint(
-                    label = formatHistoryDate(transaction.postedAtEpochMs),
+                    axisLabel = formatHistoryDate(transaction.postedAtEpochMs),
+                    detailLabel = formatHistoryDetailDate(transaction.postedAtEpochMs),
+                    timestampEpochMs = transaction.postedAtEpochMs,
                     value = runningBalanceMinor.toDouble() / 100.0,
                 ),
             )
@@ -688,6 +727,8 @@ internal fun buildLocalAccountHistoryChart(
         subtitle = "Running balance from the opening balance and tracked transactions.",
         points = points,
         valueFormatter = { value -> formatMinorMoney((value * 100).toLong(), account.currencyCode) },
+        valueFormat = AccountHistoryValueFormat.MONEY,
+        currencyCode = account.currencyCode,
     )
 }
 
@@ -709,7 +750,9 @@ internal fun buildIndexaHistoryCharts(
         .toSortedMap()
         .map { (date, value) ->
             AccountHistoryPoint(
-                label = formatIsoDate(date),
+                axisLabel = formatIsoDate(date),
+                detailLabel = formatIsoDetailDate(date),
+                timestampEpochMs = parseIsoDateEpochMs(date),
                 value = value,
             )
         }
@@ -724,6 +767,8 @@ internal fun buildIndexaHistoryCharts(
             },
             points = valuePoints,
             valueFormatter = { value -> formatMinorMoney((value * 100).toLong(), currencyCode) },
+            valueFormat = AccountHistoryValueFormat.MONEY,
+            currencyCode = currencyCode,
         )
     }
 
@@ -731,7 +776,9 @@ internal fun buildIndexaHistoryCharts(
         .toSortedMap()
         .map { (date, value) ->
             AccountHistoryPoint(
-                label = formatIsoDate(date),
+                axisLabel = formatIsoDate(date),
+                detailLabel = formatIsoDetailDate(date),
+                timestampEpochMs = parseIsoDateEpochMs(date),
                 value = value * 100.0,
             )
         }
@@ -741,7 +788,8 @@ internal fun buildIndexaHistoryCharts(
             title = "Indexa performance history",
             subtitle = "Normalized evolution from Indexa. A value of 100 means the starting point of the series.",
             points = performancePoints,
-            valueFormatter = { value -> "${value.toInt()}" },
+            valueFormatter = { value -> "${formatHistoryDecimal(value)}%" },
+            valueFormat = AccountHistoryValueFormat.PERFORMANCE_PERCENT,
         )
     }
 
@@ -756,8 +804,12 @@ internal fun buildSnapshotHistoryChart(
         .sortedBy(AccountValuationSnapshot::capturedAtEpochMs)
         .map { snapshot ->
             AccountHistoryPoint(
-                label = snapshot.valuationDate?.let(::formatIsoDate)
+                axisLabel = snapshot.valuationDate?.let(::formatIsoDate)
                     ?: formatHistoryDate(snapshot.capturedAtEpochMs),
+                detailLabel = snapshot.valuationDate?.let(::formatIsoDetailDate)
+                    ?: formatHistoryDetailDate(snapshot.capturedAtEpochMs),
+                timestampEpochMs = snapshot.valuationDate?.let(::parseIsoDateEpochMs)
+                    ?: snapshot.capturedAtEpochMs,
                 value = snapshot.valueMinor.toDouble() / 100.0,
             )
         }
@@ -769,6 +821,8 @@ internal fun buildSnapshotHistoryChart(
         subtitle = "Locally stored balance snapshots captured during syncs. Useful even when a provider does not expose full historical data.",
         points = points,
         valueFormatter = { value -> formatMinorMoney((value * 100).toLong(), account.currencyCode) },
+        valueFormat = AccountHistoryValueFormat.MONEY,
+        currencyCode = account.currencyCode,
     )
 }
 
@@ -796,6 +850,8 @@ private fun buildAccountHistoryChart(
     subtitle: String,
     points: List<AccountHistoryPoint>,
     valueFormatter: (Double) -> String,
+    valueFormat: AccountHistoryValueFormat,
+    currencyCode: String? = null,
 ): AccountHistoryChart {
     val values = points.map(AccountHistoryPoint::value)
     val minimum = values.minOrNull() ?: 0.0
@@ -805,10 +861,12 @@ private fun buildAccountHistoryChart(
         title = title,
         subtitle = subtitle,
         points = points,
+        valueFormat = valueFormat,
+        currencyCode = currencyCode,
         minimumLabel = valueFormatter(minimum),
         maximumLabel = valueFormatter(maximum),
-        startLabel = points.first().label,
-        endLabel = points.last().label,
+        startLabel = points.first().axisLabel,
+        endLabel = points.last().axisLabel,
     )
 }
 
@@ -826,8 +884,19 @@ private fun formatHistoryDate(epochMs: Long): String {
     return formatLocalDate(date)
 }
 
+private fun formatHistoryDetailDate(epochMs: Long): String {
+    val date = Instant.fromEpochMilliseconds(epochMs)
+        .toLocalDateTime(TimeZone.currentSystemDefault())
+        .date
+    return formatLocalDetailDate(date)
+}
+
 private fun formatIsoDate(isoDate: String): String = runCatching {
-    formatLocalDate(LocalDate.parse(isoDate))
+    formatLocalDate(parseFlexibleLocalDate(isoDate))
+}.getOrDefault(isoDate)
+
+private fun formatIsoDetailDate(isoDate: String): String = runCatching {
+    formatLocalDetailDate(parseFlexibleLocalDate(isoDate))
 }.getOrDefault(isoDate)
 
 private fun formatLocalDate(date: LocalDate): String {
@@ -836,6 +905,83 @@ private fun formatLocalDate(date: LocalDate): String {
         .replaceFirstChar { character -> character.uppercase() }
         .take(3)
     return "$month ${date.day}"
+}
+
+private fun formatLocalDetailDate(date: LocalDate): String {
+    val month = date.month.name
+        .lowercase()
+        .replaceFirstChar { character -> character.uppercase() }
+        .take(3)
+    return "$month ${date.day}, ${date.year}"
+}
+
+private fun parseIsoDateEpochMs(isoDate: String): Long = runCatching {
+    parseFlexibleLocalDate(isoDate)
+        .atStartOfDayIn(TimeZone.currentSystemDefault())
+        .toEpochMilliseconds()
+}.getOrDefault(0L)
+
+private fun parseFlexibleLocalDate(rawValue: String): LocalDate =
+    runCatching { LocalDate.parse(rawValue) }
+        .getOrElse {
+            val normalizedValue = rawValue.substringBefore('T')
+            LocalDate.parse(normalizedValue)
+        }
+
+private fun formatHistoryDecimal(value: Double): String =
+    value
+        .toString()
+        .trimEnd('0')
+        .trimEnd('.')
+
+internal fun AccountHistoryChart.filteredBy(range: AccountHistoryRange): AccountHistoryChart {
+    if (range == AccountHistoryRange.ALL || points.isEmpty()) return this
+
+    val filteredPoints = filterHistoryPointsByRange(points, range)
+    if (filteredPoints.isEmpty()) return this
+
+    return buildAccountHistoryChart(
+        title = title,
+        subtitle = subtitle,
+        points = filteredPoints,
+        valueFormatter = { value -> formatHistoryValue(value, valueFormat, currencyCode) },
+        valueFormat = valueFormat,
+        currencyCode = currencyCode,
+    )
+}
+
+internal fun filterHistoryPointsByRange(
+    points: List<AccountHistoryPoint>,
+    range: AccountHistoryRange,
+): List<AccountHistoryPoint> {
+    if (points.isEmpty() || range == AccountHistoryRange.ALL) return points
+
+    val latestDate = Instant.fromEpochMilliseconds(points.maxOf(AccountHistoryPoint::timestampEpochMs))
+        .toLocalDateTime(TimeZone.currentSystemDefault())
+        .date
+    val cutoffDate = latestDate.minus(range.toDatePeriod())
+    val cutoffEpochMs = cutoffDate.atStartOfDayIn(TimeZone.currentSystemDefault()).toEpochMilliseconds()
+    val inRangePoints = points.filter { point -> point.timestampEpochMs >= cutoffEpochMs }
+
+    return inRangePoints.ifEmpty { points.takeLast(1) }
+}
+
+private fun AccountHistoryRange.toDatePeriod(): DatePeriod = when (this) {
+    AccountHistoryRange.ONE_MONTH -> DatePeriod(months = 1)
+    AccountHistoryRange.THREE_MONTHS -> DatePeriod(months = 3)
+    AccountHistoryRange.SIX_MONTHS -> DatePeriod(months = 6)
+    AccountHistoryRange.ONE_YEAR -> DatePeriod(years = 1)
+    AccountHistoryRange.THREE_YEARS -> DatePeriod(years = 3)
+    AccountHistoryRange.ALL -> DatePeriod()
+}
+
+internal fun formatHistoryValue(
+    value: Double,
+    valueFormat: AccountHistoryValueFormat,
+    currencyCode: String?,
+): String = when (valueFormat) {
+    AccountHistoryValueFormat.MONEY -> formatMinorMoney((value * 100).toLong(), currencyCode ?: "EUR")
+    AccountHistoryValueFormat.PERFORMANCE_PERCENT -> "${formatHistoryDecimal(value)}%"
 }
 
 private fun formatHoldingDecimal(value: Double): String =
@@ -850,6 +996,7 @@ private fun AccountsUiState.toCreateMode(): AccountsUiState =
         selectedInvestmentPositions = emptyList(),
         accountHistoryCharts = emptyMap(),
         selectedAccountHistoryMode = AccountHistoryMode.VALUE,
+        selectedAccountHistoryRange = AccountHistoryRange.ALL,
         isLoadingAccountHistory = false,
         accountHistoryErrorMessage = null,
         draftName = "",
