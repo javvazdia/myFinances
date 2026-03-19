@@ -139,6 +139,10 @@ class StubIndexaIntegrationService(
                     accessToken = accessToken,
                     accountNumber = providerAccount.accountNumber,
                 )
+                val instrumentTransactions = apiClient.fetchInstrumentTransactions(
+                    accessToken = accessToken,
+                    accountNumber = providerAccount.accountNumber,
+                )
                 val updatedAccount = providerAccount.toLocalAccount(
                     localAccountId = localAccountId,
                     existingAccount = existingAccount,
@@ -150,6 +154,13 @@ class StubIndexaIntegrationService(
                     syncedAtEpochMs = importedAt,
                 )
                 val ledgerTransactions = cashTransactions.mapNotNull { transaction ->
+                    transaction.toLedgerTransaction(
+                        localAccountId = localAccountId,
+                        fallbackCurrencyCode = updatedAccount.currencyCode,
+                        syncedAtEpochMs = importedAt,
+                        categoryLookup = categoryLookup,
+                    )
+                } + instrumentTransactions.mapNotNull { transaction ->
                     transaction.toLedgerTransaction(
                         localAccountId = localAccountId,
                         fallbackCurrencyCode = updatedAccount.currencyCode,

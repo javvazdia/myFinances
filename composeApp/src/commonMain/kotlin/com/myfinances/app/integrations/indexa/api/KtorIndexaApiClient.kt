@@ -156,9 +156,32 @@ class KtorIndexaApiClient(
         accessToken: String,
         accountNumber: String,
     ): List<IndexaInstrumentTransaction> {
-        throw UnsupportedOperationException(
-            "Live instrument transaction sync is the next implementation step after connection setup.",
-        )
+        val response = httpClient.get {
+            url("$INDEXA_API_BASE_URL/accounts/$accountNumber/instrument-transactions")
+            header(INDEXA_AUTH_HEADER, accessToken)
+            header(HttpHeaders.Accept, ContentType.Application.Json.toString())
+        }.body<List<IndexaInstrumentTransactionResponse>>()
+
+        return response.map { transaction ->
+            IndexaInstrumentTransaction(
+                reference = transaction.reference,
+                accountNumber = transaction.accountNumber,
+                date = transaction.date,
+                valueDate = transaction.valueDate,
+                executedAt = transaction.executedAt,
+                amount = transaction.amount,
+                currencyCode = transaction.currency,
+                operationType = transaction.operationType?.trim(),
+                operationCode = transaction.operationCode,
+                status = transaction.status,
+                positionType = transaction.positionType,
+                instrumentName = transaction.instrument?.name,
+                instrumentIsin = transaction.instrument?.isinCode,
+                assetClass = transaction.instrument?.assetClass,
+                titles = transaction.titles,
+                price = transaction.price,
+            )
+        }
     }
 
     private fun buildAccountDisplayName(
@@ -356,5 +379,32 @@ private data class IndexaCashTransactionResponse(
     val status: String? = null,
     @SerialName("instrument_transaction")
     val instrumentTransaction: JsonElement? = null,
+    val document: JsonElement? = null,
+)
+
+@Serializable
+private data class IndexaInstrumentTransactionResponse(
+    @SerialName("account_number")
+    val accountNumber: String,
+    val reference: String,
+    val date: String,
+    val currency: String? = null,
+    @SerialName("value_date")
+    val valueDate: String? = null,
+    val titles: Double? = null,
+    val price: Double? = null,
+    val amount: Double? = null,
+    val status: String? = null,
+    @SerialName("position_type")
+    val positionType: String? = null,
+    @SerialName("operation_type")
+    val operationType: String? = null,
+    @SerialName("operation_code")
+    val operationCode: Int? = null,
+    @SerialName("executed_at")
+    val executedAt: String? = null,
+    val instrument: IndexaInstrumentResponse? = null,
+    val transfer: JsonElement? = null,
+    val order: JsonElement? = null,
     val document: JsonElement? = null,
 )

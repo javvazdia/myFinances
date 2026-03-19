@@ -87,18 +87,28 @@ class StubIndexaIntegrationServiceTest {
 
         assertEquals(ExternalSyncStatus.SUCCESS, syncRun.status)
         assertEquals(1, syncRun.importedAccounts)
-        assertEquals(1, syncRun.importedTransactions)
+        assertEquals(2, syncRun.importedTransactions)
         assertEquals(1, syncRun.importedPositions)
         assertEquals(1, importedAccounts.size)
-        assertEquals(1, importedTransactions.size)
+        assertEquals(2, importedTransactions.size)
         assertEquals(1, importedSnapshots.size)
         assertEquals(12_450_32L, importedSnapshots.first().valueMinor)
         assertTrue(importedCategories.any { category -> category.name == "Investment fees" })
+        assertTrue(importedCategories.any { category -> category.name == "Investment purchase" })
         assertEquals("Indexa Capital", importedAccounts.first().sourceProvider)
-        assertEquals("cash-demo-1", importedTransactions.first().externalTransactionId)
-        assertEquals(TransactionType.EXPENSE, importedTransactions.first().type)
-        assertEquals(300L, importedTransactions.first().amountMinor)
-        assertEquals("cat-expense-indexa-investment-fees", importedTransactions.first().categoryId)
+        val importedCashTransaction = importedTransactions.first { transaction ->
+            transaction.externalTransactionId == "cash-demo-1"
+        }
+        val importedInstrumentTransaction = importedTransactions.first { transaction ->
+            transaction.externalTransactionId == "instrument-demo-1"
+        }
+        assertEquals(TransactionType.EXPENSE, importedCashTransaction.type)
+        assertEquals(300L, importedCashTransaction.amountMinor)
+        assertEquals("cat-expense-indexa-investment-fees", importedCashTransaction.categoryId)
+        assertEquals(TransactionType.TRANSFER, importedInstrumentTransaction.type)
+        assertEquals(50000L, importedInstrumentTransaction.amountMinor)
+        assertEquals("cat-transfer-indexa-investment-purchase", importedInstrumentTransaction.categoryId)
+        assertTrue(importedInstrumentTransaction.note?.contains("Units: 2.05") == true)
         assertEquals(ExternalSyncStatus.SUCCESS, updatedConnection.lastSyncStatus)
         assertTrue(links.first().localAccountId != null)
     }

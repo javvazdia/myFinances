@@ -111,6 +111,47 @@ class KtorIndexaApiClientTest {
         assertEquals(4567, transactions.last().operationCode)
     }
     @Test
+    fun mapsInstrumentTransactionsFromIndexaResponse() {
+        val response = testJson.decodeFromString<List<InstrumentTransactionResponseForTest>>(
+            """
+            [
+              {
+                "account_number": "INDEXA01",
+                "reference": "048567713",
+                "date": "2015-12-18",
+                "currency": "EUR",
+                "value_date": "2015-12-17 00:00:00",
+                "titles": 489.88,
+                "price": 204.1439,
+                "amount": 100006,
+                "status": "closed",
+                "position_type": "spot",
+                "operation_type": "SUSCRIPCIÓN FONDOS INVERSIÓN",
+                "operation_code": 20,
+                "executed_at": "2015-12-17 23:59:59",
+                "instrument": {
+                  "asset_class": "equity_north_america",
+                  "isin_code": "IE0032126645",
+                  "name": "Vanguard US 500 Stk Idx -Inst"
+                }
+              }
+            ]
+            """.trimIndent(),
+        )
+
+        val transactions = response.toInstrumentTransactions()
+
+        assertEquals(1, transactions.size)
+        assertEquals("048567713", transactions.first().reference)
+        assertEquals("2015-12-17 23:59:59", transactions.first().executedAt)
+        assertEquals("SUSCRIPCIÓN FONDOS INVERSIÓN", transactions.first().operationType)
+        assertEquals("Vanguard US 500 Stk Idx -Inst", transactions.first().instrumentName)
+        assertEquals("IE0032126645", transactions.first().instrumentIsin)
+        assertEquals("equity_north_america", transactions.first().assetClass)
+        assertEquals(20, transactions.first().operationCode)
+    }
+
+    @Test
     fun mapsIndexaPerformanceResponseIntoValueAndNormalizedHistory() {
         val payload = testJson.parseToJsonElement(
             """
@@ -293,5 +334,51 @@ private fun List<CashTransactionResponseForTest>.toCashTransactions() =
             operationCode = transaction.operationCode,
             operationType = transaction.operationType?.trim(),
             comments = transaction.comments?.trim(),
+        )
+    }
+
+@kotlinx.serialization.Serializable
+private data class InstrumentTransactionResponseForTest(
+    @kotlinx.serialization.SerialName("account_number")
+    val accountNumber: String,
+    val reference: String,
+    val date: String,
+    val currency: String? = null,
+    @kotlinx.serialization.SerialName("value_date")
+    val valueDate: String? = null,
+    val titles: Double? = null,
+    val price: Double? = null,
+    val amount: Double? = null,
+    val status: String? = null,
+    @kotlinx.serialization.SerialName("position_type")
+    val positionType: String? = null,
+    @kotlinx.serialization.SerialName("operation_type")
+    val operationType: String? = null,
+    @kotlinx.serialization.SerialName("operation_code")
+    val operationCode: Int? = null,
+    @kotlinx.serialization.SerialName("executed_at")
+    val executedAt: String? = null,
+    val instrument: InstrumentForTest? = null,
+)
+
+private fun List<InstrumentTransactionResponseForTest>.toInstrumentTransactions() =
+    map { transaction ->
+        com.myfinances.app.integrations.indexa.model.IndexaInstrumentTransaction(
+            reference = transaction.reference,
+            accountNumber = transaction.accountNumber,
+            date = transaction.date,
+            valueDate = transaction.valueDate,
+            executedAt = transaction.executedAt,
+            amount = transaction.amount,
+            currencyCode = transaction.currency,
+            operationType = transaction.operationType?.trim(),
+            operationCode = transaction.operationCode,
+            status = transaction.status,
+            positionType = transaction.positionType,
+            instrumentName = transaction.instrument?.name,
+            instrumentIsin = transaction.instrument?.isinCode,
+            assetClass = transaction.instrument?.assetClass,
+            titles = transaction.titles,
+            price = transaction.price,
         )
     }
