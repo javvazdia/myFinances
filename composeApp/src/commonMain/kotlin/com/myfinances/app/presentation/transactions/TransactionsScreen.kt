@@ -33,6 +33,8 @@ fun TransactionsScreen(
     onMerchantChange: (String) -> Unit,
     onNoteChange: (String) -> Unit,
     onSaveTransaction: () -> Unit,
+    onShowTransactionDetails: (String) -> Unit,
+    onDismissTransactionDetails: () -> Unit,
     onEditTransaction: (String) -> Unit,
     onRequestDeleteTransaction: (String) -> Unit,
     onConfirmDeleteTransaction: () -> Unit,
@@ -116,6 +118,7 @@ fun TransactionsScreen(
             items(uiState.recentTransactions) { transaction ->
                 TransactionCard(
                     transaction = transaction,
+                    onShowDetails = onShowTransactionDetails,
                     onEditTransaction = onEditTransaction,
                     onRequestDeleteTransaction = onRequestDeleteTransaction,
                     canInteract = !uiState.isBusy,
@@ -124,6 +127,25 @@ fun TransactionsScreen(
                 )
             }
         }
+    }
+
+    uiState.selectedTransactionDetail?.let { transaction ->
+        AlertDialog(
+            onDismissRequest = onDismissTransactionDetails,
+            title = {
+                Text("Transaction details")
+            },
+            text = {
+                TransactionDetailsCard(transaction = transaction)
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = onDismissTransactionDetails,
+                ) {
+                    Text("Close")
+                }
+            },
+        )
     }
 
     if (uiState.deleteConfirmationTransactionId != null) {

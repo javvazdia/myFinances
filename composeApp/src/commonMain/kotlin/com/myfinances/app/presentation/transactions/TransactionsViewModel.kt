@@ -32,6 +32,7 @@ data class TransactionsUiState(
     val draftMerchant: String = "",
     val draftNote: String = "",
     val editingTransactionId: String? = null,
+    val selectedTransactionDetailId: String? = null,
     val deleteConfirmationTransactionId: String? = null,
     val isSaving: Boolean = false,
     val pendingDeleteTransactionId: String? = null,
@@ -54,6 +55,11 @@ data class TransactionsUiState(
             transaction.id == deleteConfirmationTransactionId
         }?.title
 
+    val selectedTransactionDetail: TransactionCardUiModel?
+        get() = recentTransactions.firstOrNull { transaction ->
+            transaction.id == selectedTransactionDetailId
+        }
+
     val isBusy: Boolean
         get() = isSaving || pendingDeleteTransactionId != null
 }
@@ -65,7 +71,16 @@ data class TransactionCardUiModel(
     val categoryName: String,
     val amountLabel: String,
     val dateLabel: String,
+    val sourceLabel: String?,
+    val metadataPreview: String?,
+    val detailRows: List<TransactionDetailRowUiModel>,
+    val isProviderManaged: Boolean,
     val isExpense: Boolean,
+)
+
+data class TransactionDetailRowUiModel(
+    val label: String,
+    val value: String,
 )
 
 class TransactionsViewModel(
@@ -112,6 +127,10 @@ class TransactionsViewModel(
                         selectedAccountId = nextSelectedAccountId,
                         selectedCategoryId = nextSelectedCategoryId,
                         editingTransactionId = nextEditingTransactionId,
+                        selectedTransactionDetailId = currentState.selectedTransactionDetailId
+                            ?.takeIf { detailId ->
+                                transactions.any { transaction -> transaction.id == detailId }
+                            },
                         deleteConfirmationTransactionId = currentState.deleteConfirmationTransactionId
                             ?.takeIf { confirmationId ->
                                 transactions.any { transaction -> transaction.id == confirmationId }
@@ -224,6 +243,11 @@ class TransactionsViewModel(
         _uiState.update { currentState ->
             val transaction = currentState.transactions.firstOrNull { item -> item.id == transactionId }
                 ?: return@update currentState
+            if (transaction.isProviderManaged()) {
+                return@update currentState.copy(
+                    errorMessage = "Synced provider transactions are read-only right now.",
+                )
+            }
 
             val availableCategories = currentState.categories.filter { category ->
                 category.kind == transaction.type.categoryKind
@@ -242,6 +266,7 @@ class TransactionsViewModel(
                 draftMerchant = transaction.merchantName.orEmpty(),
                 draftNote = transaction.note.orEmpty(),
                 editingTransactionId = transaction.id,
+                selectedTransactionDetailId = null,
                 deleteConfirmationTransactionId = null,
                 pendingDeleteTransactionId = null,
                 errorMessage = null,
@@ -258,8 +283,13 @@ class TransactionsViewModel(
         val selectedAccount = snapshot.accounts.firstOrNull { it.id == snapshot.selectedAccountId }
         val selectedCategoryId = snapshot.selectedCategoryId
         val amountMinor = parseTransactionAmountToMinor(snapshot.draftAmount)
+        val existingTransaction = snapshot.editingTransactionId?.let { editingId ->
+            snapshot.transactions.firstOrNull { transaction -> transaction.id == editingId }
+        }
 
         val error = when {
+            existingTransaction?.isProviderManaged() == true ->
+                "Synced provider transactions are read-only right now."
             selectedAccount == null -> "Select an account first."
             selectedCategoryId == null -> "Select a category first."
             amountMinor == null || amountMinor <= 0L ->
@@ -286,9 +316,6 @@ class TransactionsViewModel(
             }
 
             val now = Clock.System.now().toEpochMilliseconds()
-            val existingTransaction = snapshot.editingTransactionId?.let { editingId ->
-                snapshot.transactions.firstOrNull { transaction -> transaction.id == editingId }
-            }
             val transaction = FinanceTransaction(
                 id = existingTransaction?.id ?: generateTransactionId(snapshot.selectedType, now),
                 accountId = validatedAccount.id,
@@ -320,9 +347,35 @@ class TransactionsViewModel(
 
     fun requestDeleteTransaction(transactionId: String) {
         _uiState.update { currentState ->
+            val transaction = currentState.transactions.firstOrNull { item -> item.id == transactionId }
+                ?: return@update currentState
+            if (transaction.isProviderManaged()) {
+                return@update currentState.copy(
+                    errorMessage = "Synced provider transactions are managed by the provider sync.",
+                )
+            }
+
             currentState.copy(
+                selectedTransactionDetailId = null,
                 deleteConfirmationTransactionId = transactionId,
                 errorMessage = null,
+            )
+        }
+    }
+
+    fun showTransactionDetails(transactionId: String) {
+        _uiState.update { currentState ->
+            currentState.copy(
+                selectedTransactionDetailId = transactionId,
+                errorMessage = null,
+            )
+        }
+    }
+
+    fun dismissTransactionDetails() {
+        _uiState.update { currentState ->
+            currentState.copy(
+                selectedTransactionDetailId = null,
             )
         }
     }
@@ -368,23 +421,54 @@ class TransactionsViewModel(
     }
 }
 
-private fun FinanceTransaction.toCardUiModel(
+internal fun FinanceTransaction.toCardUiModel(
     accounts: List<Account>,
     categories: List<Category>,
 ): TransactionCardUiModel {
     val accountName = accounts.firstOrNull { account -> account.id == accountId }?.name ?: "Unknown account"
     val categoryName = categories.firstOrNull { category -> category.id == categoryId }?.name ?: "Uncategorized"
     val isExpense = type == TransactionType.EXPENSE
+    val isProviderManaged = isProviderManaged()
 
     return TransactionCardUiModel(
         id = id,
-        title = merchantName ?: note ?: type.label,
+        title = merchantName ?: type.label,
         accountName = accountName,
         categoryName = categoryName,
         amountLabel = buildSignedAmountLabel(amountMinor, currencyCode, isExpense),
         dateLabel = formatTransactionDateLabel(postedAtEpochMs),
+        sourceLabel = sourceProvider?.let { provider -> "Synced from $provider" },
+        metadataPreview = buildTransactionMetadataPreview(),
+        detailRows = buildTransactionDetailRows(accountName, categoryName),
+        isProviderManaged = isProviderManaged,
         isExpense = isExpense,
     )
+}
+
+private fun FinanceTransaction.buildTransactionMetadataPreview(): String? =
+    note?.takeIf(String::isNotBlank)
+        ?: externalTransactionId?.takeIf(String::isNotBlank)?.let { reference -> "Reference $reference" }
+
+private fun FinanceTransaction.buildTransactionDetailRows(
+    accountName: String,
+    categoryName: String,
+): List<TransactionDetailRowUiModel> = buildList {
+    add(TransactionDetailRowUiModel(label = "Account", value = accountName))
+    add(TransactionDetailRowUiModel(label = "Category", value = categoryName))
+    add(TransactionDetailRowUiModel(label = "Type", value = type.label))
+    add(TransactionDetailRowUiModel(label = "Date", value = formatTransactionDateLabel(postedAtEpochMs)))
+    sourceProvider?.takeIf(String::isNotBlank)?.let { provider ->
+        add(TransactionDetailRowUiModel(label = "Source", value = "Synced from $provider"))
+    }
+    externalTransactionId?.takeIf(String::isNotBlank)?.let { reference ->
+        add(TransactionDetailRowUiModel(label = "Reference", value = reference))
+    }
+    merchantName?.takeIf(String::isNotBlank)?.let { merchant ->
+        add(TransactionDetailRowUiModel(label = "Merchant", value = merchant))
+    }
+    note?.takeIf(String::isNotBlank)?.let { transactionNote ->
+        add(TransactionDetailRowUiModel(label = "Notes", value = transactionNote))
+    }
 }
 
 private fun buildSignedAmountLabel(
@@ -392,9 +476,16 @@ private fun buildSignedAmountLabel(
     currencyCode: String,
     isExpense: Boolean,
 ): String {
-    val sign = if (isExpense) "-" else "+"
-    return sign + formatTransactionMoney(amountMinor, currencyCode)
+    val sign = when {
+        isExpense -> "-"
+        amountMinor < 0L -> "-"
+        else -> "+"
+    }
+    return sign + formatTransactionMoney(kotlin.math.abs(amountMinor), currencyCode)
 }
+
+internal fun FinanceTransaction.isProviderManaged(): Boolean =
+    !sourceProvider.isNullOrBlank() && !externalTransactionId.isNullOrBlank()
 
 internal val manualTransactionTypes: List<TransactionType> = listOf(
     TransactionType.EXPENSE,
@@ -452,6 +543,7 @@ private fun TransactionsUiState.toCreateMode(): TransactionsUiState =
         draftNote = "",
         isFormVisible = false,
         editingTransactionId = null,
+        selectedTransactionDetailId = null,
         deleteConfirmationTransactionId = null,
         isSaving = false,
         pendingDeleteTransactionId = null,
