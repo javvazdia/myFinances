@@ -15,26 +15,27 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.myfinances.app.domain.model.integration.ExternalAccountLink
 import com.myfinances.app.domain.model.integration.ExternalConnection
+import com.myfinances.app.domain.model.integration.ExternalConnectionPreview
 import com.myfinances.app.domain.model.integration.ExternalConnectionStatus
+import com.myfinances.app.domain.model.integration.ExternalDiscoveredAccountPreview
 import com.myfinances.app.domain.model.integration.ExternalIntegrationStage
 import com.myfinances.app.domain.model.integration.ExternalProviderCatalog
 import com.myfinances.app.domain.model.integration.ExternalProviderDefinition
 import com.myfinances.app.domain.model.integration.ExternalProviderId
 import com.myfinances.app.domain.model.integration.ExternalSyncRun
 import com.myfinances.app.domain.model.integration.ExternalSyncStatus
-import com.myfinances.app.integrations.indexa.model.IndexaAccountSummary
-import com.myfinances.app.integrations.indexa.model.IndexaConnectionPreview
 import com.myfinances.app.presentation.shared.formatTimestampLabel
 
 @Composable
 internal fun ConnectionsOverviewCard(
     uiState: SettingsUiState,
     onSelectConnection: (String) -> Unit,
-    onIndexaTokenChange: (String) -> Unit,
-    onTestIndexaConnection: () -> Unit,
-    onConnectIndexa: () -> Unit,
-    onRunIndexaSync: () -> Unit,
+    onProviderSecretChange: (ExternalProviderId, String) -> Unit,
+    onTestProviderConnection: (ExternalProviderId) -> Unit,
+    onConnectProvider: (ExternalProviderId) -> Unit,
+    onRunProviderSync: (ExternalProviderId) -> Unit,
     onRequestDisconnectConnection: (String) -> Unit,
 ) {
     Card {
@@ -51,7 +52,7 @@ internal fun ConnectionsOverviewCard(
             )
 
             Text(
-                text = "This new foundation is provider-agnostic. Indexa is the first target, but the same connection and sync model is meant to support more brokers and banks later.",
+                text = "The connection and sync workflow is now provider-oriented instead of provider-specific. Indexa is still the first live provider, but the same setup card and sync controls are ready for the next integration.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -60,43 +61,55 @@ internal fun ConnectionsOverviewCard(
                 val connection = uiState.connections.firstOrNull { item ->
                     item.providerId == provider.id
                 }
+                val providerState = uiState.providerState(provider.id)
+
                 ProviderCard(
                     provider = provider,
                     connection = connection,
                     onSelectConnection = onSelectConnection,
                     isSelected = uiState.selectedConnectionId == connection?.id,
                 )
-            }
 
-            IndexaSetupCard(
-                uiState = uiState,
-                onIndexaTokenChange = onIndexaTokenChange,
-                onTestIndexaConnection = onTestIndexaConnection,
-                onConnectIndexa = onConnectIndexa,
-                onRunIndexaSync = onRunIndexaSync,
-                onRequestDisconnectConnection = onRequestDisconnectConnection,
-            )
+                if (provider.stage == ExternalIntegrationStage.ACTIVE && provider.credentialLabel != null) {
+                    ProviderSetupCard(
+                        provider = provider,
+                        providerState = providerState,
+                        connection = connection,
+                        isSelectedConnection = uiState.selectedConnection?.id == connection?.id,
+                        accountLinks = connection
+                            ?.let { activeConnection -> uiState.accountLinksByConnection[activeConnection.id].orEmpty() }
+                            .orEmpty(),
+                        syncRuns = connection
+                            ?.let { activeConnection -> uiState.syncRunsByConnection[activeConnection.id].orEmpty() }
+                            .orEmpty(),
+                        pendingDisconnectConnectionId = uiState.pendingDisconnectConnectionId,
+                        onSecretChange = onProviderSecretChange,
+                        onTestConnection = onTestProviderConnection,
+                        onConnect = onConnectProvider,
+                        onRunSync = onRunProviderSync,
+                        onRequestDisconnectConnection = onRequestDisconnectConnection,
+                    )
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun IndexaSetupCard(
-    uiState: SettingsUiState,
-    onIndexaTokenChange: (String) -> Unit,
-    onTestIndexaConnection: () -> Unit,
-    onConnectIndexa: () -> Unit,
-    onRunIndexaSync: () -> Unit,
+private fun ProviderSetupCard(
+    provider: ExternalProviderDefinition,
+    providerState: ProviderConnectionUiState,
+    connection: ExternalConnection?,
+    isSelectedConnection: Boolean,
+    accountLinks: List<ExternalAccountLink>,
+    syncRuns: List<ExternalSyncRun>,
+    pendingDisconnectConnectionId: String?,
+    onSecretChange: (ExternalProviderId, String) -> Unit,
+    onTestConnection: (ExternalProviderId) -> Unit,
+    onConnect: (ExternalProviderId) -> Unit,
+    onRunSync: (ExternalProviderId) -> Unit,
     onRequestDisconnectConnection: (String) -> Unit,
 ) {
-    val indexaConnection = uiState.connections.firstOrNull { connection ->
-        connection.providerId == ExternalProviderId.INDEXA
-    }
-    val isSelectedConnection = uiState.selectedConnection?.id == indexaConnection?.id
-    val indexaSyncRuns = indexaConnection
-        ?.let { connection -> uiState.syncRunsByConnection[connection.id].orEmpty() }
-        .orEmpty()
-
     Card(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
@@ -109,64 +122,66 @@ private fun IndexaSetupCard(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
-                text = "Indexa setup",
+                text = "${provider.displayName} setup",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
             )
 
             Text(
-                text = "Paste your read-only Indexa API token, test the connection, and then save the local connection. This token is kept behind the secret-store abstraction, not in the ledger database.",
+                text = "Set up ${provider.displayName} through the shared provider connector flow. The ledger, links, sync history, and disconnect behavior stay generic while each provider keeps its own API logic behind the connector.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
             OutlinedTextField(
-                value = uiState.draftIndexaToken,
-                onValueChange = onIndexaTokenChange,
+                value = providerState.draftSecret,
+                onValueChange = { value -> onSecretChange(provider.id, value) },
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("Indexa API token") },
-                supportingText = { Text("Start with a personal read-only token from your Indexa account settings.") },
+                label = { Text(provider.credentialLabel ?: "Credential") },
+                supportingText = {
+                    Text(provider.credentialSupportingText ?: "Provide the secret needed to connect this provider.")
+                },
                 singleLine = true,
-                enabled = !uiState.isTestingIndexa && !uiState.isConnectingIndexa && !uiState.isSyncingIndexa,
+                enabled = !providerState.isTesting && !providerState.isConnecting && !providerState.isSyncing,
             )
 
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Button(
-                    onClick = onTestIndexaConnection,
-                    enabled = !uiState.isTestingIndexa && !uiState.isConnectingIndexa && !uiState.isSyncingIndexa,
+                    onClick = { onTestConnection(provider.id) },
+                    enabled = !providerState.isTesting && !providerState.isConnecting && !providerState.isSyncing,
                 ) {
-                    Text(if (uiState.isTestingIndexa) "Testing..." else "Test connection")
+                    Text(if (providerState.isTesting) "Testing..." else "Test connection")
                 }
 
                 Button(
-                    onClick = onConnectIndexa,
-                    enabled = !uiState.isTestingIndexa &&
-                        !uiState.isConnectingIndexa &&
-                        !uiState.isSyncingIndexa &&
-                        uiState.draftIndexaToken.isNotBlank(),
+                    onClick = { onConnect(provider.id) },
+                    enabled = !providerState.isTesting &&
+                        !providerState.isConnecting &&
+                        !providerState.isSyncing &&
+                        providerState.draftSecret.isNotBlank(),
                 ) {
-                    Text(if (uiState.isConnectingIndexa) "Connecting..." else "Save connection")
+                    Text(if (providerState.isConnecting) "Connecting..." else "Save connection")
                 }
 
-                if (indexaConnection != null) {
+                if (connection != null) {
                     Button(
-                        onClick = onRunIndexaSync,
-                        enabled = !uiState.isTestingIndexa &&
-                            !uiState.isConnectingIndexa &&
-                            !uiState.isSyncingIndexa,
+                        onClick = { onRunSync(provider.id) },
+                        enabled = !providerState.isTesting &&
+                            !providerState.isConnecting &&
+                            !providerState.isSyncing,
                     ) {
-                        Text(if (uiState.isSyncingIndexa) "Syncing..." else "Sync now")
+                        Text(if (providerState.isSyncing) "Syncing..." else "Sync now")
                     }
 
                     Button(
-                        onClick = { onRequestDisconnectConnection(indexaConnection.id) },
-                        enabled = !uiState.isTestingIndexa &&
-                            !uiState.isConnectingIndexa &&
-                            !uiState.isSyncingIndexa &&
-                            uiState.pendingDisconnectConnectionId == null,
+                        onClick = { onRequestDisconnectConnection(connection.id) },
+                        enabled = !providerState.isTesting &&
+                            !providerState.isConnecting &&
+                            !providerState.isSyncing &&
+                            pendingDisconnectConnectionId == null,
                     ) {
                         Text(
-                            if (uiState.pendingDisconnectConnectionId == indexaConnection.id) {
+                            if (pendingDisconnectConnectionId == connection.id) {
                                 "Disconnecting..."
                             } else {
                                 "Disconnect"
@@ -176,40 +191,37 @@ private fun IndexaSetupCard(
                 }
             }
 
-            if (uiState.indexaConnectionMessage != null) {
+            providerState.message?.let { message ->
                 Text(
-                    text = uiState.indexaConnectionMessage,
+                    text = message,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.primary,
                 )
             }
 
-            if (uiState.indexaConnectionError != null) {
+            providerState.error?.let { error ->
                 Text(
-                    text = uiState.indexaConnectionError,
+                    text = error,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.error,
                 )
             }
 
-            if (uiState.indexaPreview != null) {
-                IndexaPreviewSection(preview = uiState.indexaPreview)
+            providerState.preview?.let { preview ->
+                ProviderPreviewSection(preview = preview)
             }
 
-            if (indexaConnection != null && isSelectedConnection) {
+            if (connection != null && isSelectedConnection) {
                 ConnectionDetailSection(
-                    connection = indexaConnection,
-                    accountLinks = uiState.selectedConnection
-                        ?.takeIf { connection -> connection.id == indexaConnection.id }
-                        ?.let { uiState.selectedConnectionAccountLinks }
-                        ?: uiState.accountLinksByConnection[indexaConnection.id].orEmpty(),
-                    syncRuns = indexaSyncRuns,
-                    isSyncing = uiState.isSyncingIndexa,
+                    connection = connection,
+                    accountLinks = accountLinks,
+                    syncRuns = syncRuns,
+                    isSyncing = providerState.isSyncing,
                 )
             } else {
                 SyncHistorySection(
-                    syncRuns = indexaSyncRuns,
-                    isSyncing = uiState.isSyncingIndexa,
+                    syncRuns = syncRuns,
+                    isSyncing = providerState.isSyncing,
                 )
             }
         }
@@ -219,7 +231,7 @@ private fun IndexaSetupCard(
 @Composable
 private fun ConnectionDetailSection(
     connection: ExternalConnection,
-    accountLinks: List<com.myfinances.app.domain.model.integration.ExternalAccountLink>,
+    accountLinks: List<ExternalAccountLink>,
     syncRuns: List<ExternalSyncRun>,
     isSyncing: Boolean,
 ) {
@@ -362,7 +374,7 @@ private fun SyncRunCard(syncRun: ExternalSyncRun) {
 
 @Composable
 private fun LinkedAccountsSection(
-    accountLinks: List<com.myfinances.app.domain.model.integration.ExternalAccountLink>,
+    accountLinks: List<ExternalAccountLink>,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(
@@ -373,7 +385,7 @@ private fun LinkedAccountsSection(
 
         if (accountLinks.isEmpty()) {
             Text(
-                text = "No linked provider accounts yet. Run a sync to import or refresh the discovered Indexa accounts.",
+                text = "No linked provider accounts yet. Run a sync to import or refresh the discovered provider accounts.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -414,7 +426,7 @@ private fun LinkedAccountsSection(
 }
 
 @Composable
-private fun IndexaPreviewSection(preview: IndexaConnectionPreview) {
+private fun ProviderPreviewSection(preview: ExternalConnectionPreview) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(
             text = "Connection preview",
@@ -426,12 +438,14 @@ private fun IndexaPreviewSection(preview: IndexaConnectionPreview) {
             text = "Suggested name: ${preview.suggestedConnectionName}",
             style = MaterialTheme.typography.bodyMedium,
         )
-        Text(
-            text = "Detected account owner: ${preview.profile.fullName ?: preview.profile.email}",
-            style = MaterialTheme.typography.bodyMedium,
-        )
+        preview.ownerLabel?.let { ownerLabel ->
+            Text(
+                text = "Detected account owner: $ownerLabel",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
 
-        preview.profile.accounts.forEach { account ->
+        preview.discoveredAccounts.forEach { account ->
             Card(
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
@@ -449,7 +463,7 @@ private fun IndexaPreviewSection(preview: IndexaConnectionPreview) {
                         fontWeight = FontWeight.Medium,
                     )
                     Text(
-                        text = "Account: ${account.accountNumber}",
+                        text = "Account: ${account.providerAccountId}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -544,14 +558,12 @@ private fun DetailLine(
     }
 }
 
-private fun buildPreviewAccountSubtitle(previewAccount: IndexaAccountSummary): String {
-    val type = previewAccount.productType ?: "unknown type"
+internal fun buildPreviewAccountSubtitle(previewAccount: ExternalDiscoveredAccountPreview): String {
+    val type = previewAccount.accountTypeLabel ?: "unknown type"
     val currency = previewAccount.currencyCode ?: "unknown currency"
-    val valuation = previewAccount.currentValuation?.let { value ->
-        " | approx. $value $currency"
-    }.orEmpty()
+    val balance = previewAccount.balanceLabel?.let { value -> " | approx. $value" }.orEmpty()
 
-    return "$type | $currency$valuation"
+    return "$type | $currency$balance"
 }
 
 private val ExternalIntegrationStage.label: String
@@ -587,9 +599,9 @@ private fun buildConnectionStatusMessage(
             ExternalIntegrationStage.PLANNED ->
                 "This provider is on the roadmap but not scaffolded yet."
             ExternalIntegrationStage.SCAFFOLDED ->
-                "The shared connection and sync foundation is ready. The next step is the live token-based setup and import flow."
+                "The shared connection and sync foundation is ready. The next step is plugging in the live provider connector."
             ExternalIntegrationStage.ACTIVE ->
-                "This provider is ready to be connected."
+                "This provider is ready to be connected through the shared workflow."
         }
     }
 
@@ -619,7 +631,7 @@ internal fun buildSyncRunSummary(syncRun: ExternalSyncRun): String {
 }
 
 internal fun buildLinkedAccountSubtitle(
-    accountLink: com.myfinances.app.domain.model.integration.ExternalAccountLink,
+    accountLink: ExternalAccountLink,
 ): String {
     val type = accountLink.accountTypeLabel ?: "Unknown type"
     val currency = accountLink.currencyCode ?: "Unknown currency"
@@ -628,7 +640,7 @@ internal fun buildLinkedAccountSubtitle(
 }
 
 internal fun buildLinkedAccountImportLabel(
-    accountLink: com.myfinances.app.domain.model.integration.ExternalAccountLink,
+    accountLink: ExternalAccountLink,
 ): String = accountLink.lastImportedAtEpochMs
     ?.let { importedAt -> "Last imported ${formatSyncRunTimestamp(importedAt)}" }
     ?: "Not imported yet"

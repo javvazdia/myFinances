@@ -7,7 +7,9 @@ import com.myfinances.app.domain.model.AccountType
 import com.myfinances.app.domain.model.InvestmentPosition
 import com.myfinances.app.domain.model.integration.ExternalAccountLink
 import com.myfinances.app.domain.model.integration.ExternalConnection
+import com.myfinances.app.domain.model.integration.ExternalConnectionPreview
 import com.myfinances.app.domain.model.integration.ExternalConnectionStatus
+import com.myfinances.app.domain.model.integration.ExternalDiscoveredAccountPreview
 import com.myfinances.app.domain.model.integration.ExternalProviderId
 import com.myfinances.app.domain.model.integration.ExternalSyncRun
 import com.myfinances.app.domain.model.integration.ExternalSyncStatus
@@ -31,7 +33,10 @@ class StubIndexaIntegrationService(
     private val externalConnectionsRepository: ExternalConnectionsRepository,
     private val connectionSecretStore: ConnectionSecretStore,
 ) : IndexaIntegrationService {
-    override suspend fun testConnection(accessToken: String): IndexaConnectionPreview {
+    override suspend fun testConnection(secret: String): ExternalConnectionPreview =
+        fetchConnectionPreview(secret).toExternalConnectionPreview()
+
+    private suspend fun fetchConnectionPreview(accessToken: String): IndexaConnectionPreview {
         val profile = apiClient.fetchUserProfile(accessToken)
         return IndexaConnectionPreview(
             profile = profile,
@@ -39,8 +44,8 @@ class StubIndexaIntegrationService(
         )
     }
 
-    override suspend fun connect(accessToken: String): ExternalConnection {
-        val preview = testConnection(accessToken)
+    override suspend fun connect(secret: String): ExternalConnection {
+        val preview = fetchConnectionPreview(secret)
         val now = Clock.System.now().toEpochMilliseconds()
         val existingConnection = externalConnectionsRepository
             .observeConnections()
@@ -79,7 +84,7 @@ class StubIndexaIntegrationService(
         connectionSecretStore.saveSecret(
             providerId = ExternalProviderId.INDEXA,
             connectionId = connection.id,
-            secret = accessToken,
+            secret = secret,
         )
 
         return connection
@@ -493,3 +498,22 @@ private fun buildInvestmentPositionId(
 
     return "position-$accountId-$slug-$index"
 }
+
+private fun IndexaConnectionPreview.toExternalConnectionPreview(): ExternalConnectionPreview =
+    ExternalConnectionPreview(
+        suggestedConnectionName = suggestedConnectionName,
+        ownerLabel = profile.fullName ?: profile.email,
+        discoveredAccounts = profile.accounts.map { account ->
+            ExternalDiscoveredAccountPreview(
+                providerAccountId = account.accountNumber,
+                displayName = account.displayName,
+                accountTypeLabel = account.productType,
+                currencyCode = account.currencyCode,
+                balanceLabel = account.currentValuation?.let { value ->
+                    val currency = normalizeIndexaCurrencyCode(account.currencyCode)
+                        ?: DEFAULT_INDEXA_CURRENCY_CODE
+                    "$value $currency"
+                },
+            )
+        },
+    )

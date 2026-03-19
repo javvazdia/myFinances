@@ -9,16 +9,24 @@ import com.myfinances.app.domain.repository.ConnectionSecretStore
 import com.myfinances.app.domain.repository.FinanceRepository
 import com.myfinances.app.domain.repository.ExternalConnectionsRepository
 import com.myfinances.app.domain.repository.LedgerRepository
+import com.myfinances.app.integrations.ExternalProviderConnector
+import com.myfinances.app.integrations.cajaingenieros.api.CajaIngenierosApiClient
+import com.myfinances.app.integrations.cajaingenieros.api.StubCajaIngenierosApiClient
+import com.myfinances.app.integrations.cajaingenieros.sync.CajaIngenierosIntegrationService
+import com.myfinances.app.integrations.cajaingenieros.sync.ScaffoldedCajaIngenierosIntegrationService
 import com.myfinances.app.integrations.indexa.api.IndexaApiClient
 import com.myfinances.app.integrations.indexa.api.KtorIndexaApiClient
 import com.myfinances.app.integrations.indexa.sync.IndexaIntegrationService
 import com.myfinances.app.integrations.indexa.sync.StubIndexaIntegrationService
+import com.myfinances.app.domain.model.integration.ExternalProviderId
 
 data class AppDependencies(
     val financeRepository: FinanceRepository,
     val ledgerRepository: LedgerRepository,
     val externalConnectionsRepository: ExternalConnectionsRepository,
+    val providerConnectors: Map<ExternalProviderId, ExternalProviderConnector>,
     val indexaIntegrationService: IndexaIntegrationService,
+    val cajaIngenierosIntegrationService: CajaIngenierosIntegrationService,
     val seedStarterData: suspend () -> Unit,
 )
 
@@ -37,6 +45,14 @@ fun buildAppDependencies(
         externalConnectionsRepository = externalConnectionsRepository,
         connectionSecretStore = connectionSecretStore,
     )
+    val cajaIngenierosApiClient: CajaIngenierosApiClient = StubCajaIngenierosApiClient()
+    val cajaIngenierosIntegrationService = ScaffoldedCajaIngenierosIntegrationService(
+        apiClient = cajaIngenierosApiClient,
+    )
+    val providerConnectors: Map<ExternalProviderId, ExternalProviderConnector> = mapOf(
+        ExternalProviderId.INDEXA to indexaIntegrationService,
+        ExternalProviderId.CAJA_INGENIEROS to cajaIngenierosIntegrationService,
+    )
     val seeder = StarterDataSeeder(
         database = database,
         ledgerRepository = ledgerRepository,
@@ -46,7 +62,9 @@ fun buildAppDependencies(
         financeRepository = financeRepository,
         ledgerRepository = ledgerRepository,
         externalConnectionsRepository = externalConnectionsRepository,
+        providerConnectors = providerConnectors,
         indexaIntegrationService = indexaIntegrationService,
+        cajaIngenierosIntegrationService = cajaIngenierosIntegrationService,
         seedStarterData = { seeder.seedIfNeeded() },
     )
 }

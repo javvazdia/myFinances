@@ -20,15 +20,16 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.myfinances.app.domain.model.CategoryKind
+import com.myfinances.app.domain.model.integration.ExternalProviderId
 
 @Composable
 fun SettingsScreen(
     uiState: SettingsUiState,
     onSelectConnection: (String) -> Unit,
-    onIndexaTokenChange: (String) -> Unit,
-    onTestIndexaConnection: () -> Unit,
-    onConnectIndexa: () -> Unit,
-    onRunIndexaSync: () -> Unit,
+    onProviderSecretChange: (ExternalProviderId, String) -> Unit,
+    onTestProviderConnection: (ExternalProviderId) -> Unit,
+    onConnectProvider: (ExternalProviderId) -> Unit,
+    onRunProviderSync: (ExternalProviderId) -> Unit,
     onRequestDisconnectConnection: (String) -> Unit,
     onConfirmDisconnectConnection: () -> Unit,
     onDismissDisconnectDialog: () -> Unit,
@@ -75,10 +76,10 @@ fun SettingsScreen(
             ConnectionsOverviewCard(
                 uiState = uiState,
                 onSelectConnection = onSelectConnection,
-                onIndexaTokenChange = onIndexaTokenChange,
-                onTestIndexaConnection = onTestIndexaConnection,
-                onConnectIndexa = onConnectIndexa,
-                onRunIndexaSync = onRunIndexaSync,
+                onProviderSecretChange = onProviderSecretChange,
+                onTestProviderConnection = onTestProviderConnection,
+                onConnectProvider = onConnectProvider,
+                onRunProviderSync = onRunProviderSync,
                 onRequestDisconnectConnection = onRequestDisconnectConnection,
             )
         }

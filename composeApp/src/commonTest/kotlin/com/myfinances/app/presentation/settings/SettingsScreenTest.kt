@@ -4,6 +4,7 @@ import com.myfinances.app.domain.model.Category
 import com.myfinances.app.domain.model.CategoryKind
 import com.myfinances.app.domain.model.integration.ExternalAccountLink
 import com.myfinances.app.domain.model.integration.ExternalConnection
+import com.myfinances.app.domain.model.integration.ExternalDiscoveredAccountPreview
 import com.myfinances.app.domain.model.integration.ExternalConnectionStatus
 import com.myfinances.app.domain.model.integration.ExternalProviderId
 import com.myfinances.app.domain.model.integration.ExternalSyncRun
@@ -200,5 +201,26 @@ class SettingsScreenTest {
         )
 
         assertEquals("Not imported yet", buildLinkedAccountImportLabel(accountLink))
+    }
+
+    @Test
+    fun exposesDefaultProviderStateForAvailableProviders() {
+        val providerState = SettingsUiState().providerState(ExternalProviderId.INDEXA)
+
+        assertEquals("", providerState.draftSecret)
+        assertEquals(false, providerState.isConnecting)
+    }
+
+    @Test
+    fun buildsPreviewAccountSubtitleFromGenericProviderPreview() {
+        val preview = ExternalDiscoveredAccountPreview(
+            providerAccountId = "ACC-1",
+            displayName = "Indexa profile",
+            accountTypeLabel = "Mutual",
+            currencyCode = "EUR",
+            balanceLabel = "1234.56 EUR",
+        )
+
+        assertEquals("Mutual | EUR | approx. 1234.56 EUR", buildPreviewAccountSubtitle(preview))
     }
 }

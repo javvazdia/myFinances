@@ -6,12 +6,13 @@ import com.myfinances.app.domain.model.Category
 import com.myfinances.app.domain.model.CategoryKind
 import com.myfinances.app.domain.model.integration.ExternalAccountLink
 import com.myfinances.app.domain.model.integration.ExternalConnection
+import com.myfinances.app.domain.model.integration.ExternalConnectionPreview
+import com.myfinances.app.domain.model.integration.ExternalProviderCatalog
 import com.myfinances.app.domain.model.integration.ExternalProviderId
 import com.myfinances.app.domain.model.integration.ExternalSyncRun
 import com.myfinances.app.domain.repository.ExternalConnectionsRepository
 import com.myfinances.app.domain.repository.LedgerRepository
-import com.myfinances.app.integrations.indexa.model.IndexaConnectionPreview
-import com.myfinances.app.integrations.indexa.sync.IndexaIntegrationService
+import com.myfinances.app.integrations.ExternalProviderConnector
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -24,19 +25,23 @@ import kotlinx.coroutines.launch
 import kotlin.random.Random
 import kotlin.time.Clock
 
+data class ProviderConnectionUiState(
+    val draftSecret: String = "",
+    val preview: ExternalConnectionPreview? = null,
+    val isTesting: Boolean = false,
+    val isConnecting: Boolean = false,
+    val isSyncing: Boolean = false,
+    val message: String? = null,
+    val error: String? = null,
+)
+
 data class SettingsUiState(
     val connections: List<ExternalConnection> = emptyList(),
     val selectedConnectionId: String? = null,
     val accountLinksByConnection: Map<String, List<ExternalAccountLink>> = emptyMap(),
     val syncRunsByConnection: Map<String, List<ExternalSyncRun>> = emptyMap(),
+    val providerStates: Map<ExternalProviderId, ProviderConnectionUiState> = defaultProviderStates(),
     val categories: List<Category> = emptyList(),
-    val draftIndexaToken: String = "",
-    val indexaPreview: IndexaConnectionPreview? = null,
-    val isTestingIndexa: Boolean = false,
-    val isConnectingIndexa: Boolean = false,
-    val isSyncingIndexa: Boolean = false,
-    val indexaConnectionMessage: String? = null,
-    val indexaConnectionError: String? = null,
     val disconnectConfirmationConnectionId: String? = null,
     val pendingDisconnectConnectionId: String? = null,
     val draftName: String = "",
@@ -84,7 +89,7 @@ data class SettingsUiState(
 class SettingsViewModel(
     private val ledgerRepository: LedgerRepository,
     private val externalConnectionsRepository: ExternalConnectionsRepository,
-    private val indexaIntegrationService: IndexaIntegrationService,
+    private val providerConnectors: Map<ExternalProviderId, ExternalProviderConnector>,
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(SettingsUiState())
     val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()
@@ -147,6 +152,7 @@ class SettingsViewModel(
                             ?: connections.firstOrNull()?.id,
                         accountLinksByConnection = combinedState.accountLinksByConnection,
                         syncRunsByConnection = combinedState.syncRunsByConnection,
+                        providerStates = ensureAllProviderStates(currentState.providerStates),
                         categories = combinedState.categories,
                         editingCategoryId = currentState.editingCategoryId
                             ?.takeIf { editingId ->
@@ -176,168 +182,191 @@ class SettingsViewModel(
 
     fun selectConnection(connectionId: String) {
         _uiState.update { currentState ->
-            currentState.copy(
-                selectedConnectionId = connectionId,
-                indexaConnectionError = null,
-                indexaConnectionMessage = null,
-            )
+            currentState.copy(selectedConnectionId = connectionId)
         }
     }
 
-    fun onNameChange(value: String) {
+    fun onProviderSecretChange(
+        providerId: ExternalProviderId,
+        value: String,
+    ) {
         _uiState.update { currentState ->
             currentState.copy(
-                draftName = value,
-                errorMessage = null,
+                providerStates = currentState.providerStates.updated(
+                    providerId = providerId,
+                ) { providerState ->
+                    providerState.copy(
+                        draftSecret = value,
+                        preview = null,
+                        message = null,
+                        error = null,
+                    )
+                },
             )
         }
     }
 
-    fun onIndexaTokenChange(value: String) {
-        _uiState.update { currentState ->
-            currentState.copy(
-                draftIndexaToken = value,
-                indexaPreview = null,
-                indexaConnectionMessage = null,
-                indexaConnectionError = null,
-            )
-        }
-    }
-
-    fun testIndexaConnection() {
-        val token = uiState.value.draftIndexaToken.trim()
-        if (token.isBlank()) {
-            _uiState.update { currentState ->
-                currentState.copy(
-                    indexaConnectionError = "Paste an Indexa API token first.",
-                    indexaConnectionMessage = null,
-                )
-            }
+    fun testProviderConnection(providerId: ExternalProviderId) {
+        val connector = providerConnectors[providerId] ?: return
+        val providerName = providerDisplayName(providerId)
+        val secret = uiState.value.providerState(providerId).draftSecret.trim()
+        if (secret.isBlank()) {
+            setProviderError(providerId, "Paste a $providerName credential first.")
             return
         }
 
         viewModelScope.launch {
             _uiState.update { currentState ->
                 currentState.copy(
-                    isTestingIndexa = true,
-                    indexaConnectionError = null,
-                    indexaConnectionMessage = null,
+                    providerStates = currentState.providerStates.updated(providerId) { providerState ->
+                        providerState.copy(
+                            isTesting = true,
+                            message = null,
+                            error = null,
+                        )
+                    },
                 )
             }
 
             runCatching {
-                indexaIntegrationService.testConnection(token)
+                connector.testConnection(secret)
             }.onSuccess { preview ->
                 _uiState.update { currentState ->
                     currentState.copy(
-                        isTestingIndexa = false,
-                        indexaPreview = preview,
-                        indexaConnectionMessage = "Connection test succeeded. Review the discovered accounts and save the connection when ready.",
-                        indexaConnectionError = null,
+                        providerStates = currentState.providerStates.updated(providerId) { providerState ->
+                            providerState.copy(
+                                isTesting = false,
+                                preview = preview,
+                                message = "Connection test succeeded. Review the discovered accounts and save the connection when ready.",
+                                error = null,
+                            )
+                        },
                     )
                 }
             }.onFailure { throwable ->
                 _uiState.update { currentState ->
                     currentState.copy(
-                        isTestingIndexa = false,
-                        indexaPreview = null,
-                        indexaConnectionMessage = null,
-                        indexaConnectionError = throwable.message ?: "Indexa connection test failed.",
+                        providerStates = currentState.providerStates.updated(providerId) { providerState ->
+                            providerState.copy(
+                                isTesting = false,
+                                preview = null,
+                                message = null,
+                                error = throwable.message ?: "$providerName connection test failed.",
+                            )
+                        },
                     )
                 }
             }
         }
     }
 
-    fun connectIndexa() {
-        val token = uiState.value.draftIndexaToken.trim()
-        if (token.isBlank()) {
-            _uiState.update { currentState ->
-                currentState.copy(
-                    indexaConnectionError = "Paste an Indexa API token first.",
-                    indexaConnectionMessage = null,
-                )
-            }
+    fun connectProvider(providerId: ExternalProviderId) {
+        val connector = providerConnectors[providerId] ?: return
+        val providerName = providerDisplayName(providerId)
+        val secret = uiState.value.providerState(providerId).draftSecret.trim()
+        if (secret.isBlank()) {
+            setProviderError(providerId, "Paste a $providerName credential first.")
             return
         }
 
         viewModelScope.launch {
             _uiState.update { currentState ->
                 currentState.copy(
-                    isConnectingIndexa = true,
-                    indexaConnectionError = null,
-                    indexaConnectionMessage = null,
+                    providerStates = currentState.providerStates.updated(providerId) { providerState ->
+                        providerState.copy(
+                            isConnecting = true,
+                            message = null,
+                            error = null,
+                        )
+                    },
                 )
             }
 
             runCatching {
-                indexaIntegrationService.connect(token)
+                connector.connect(secret)
             }.onSuccess { connection ->
                 _uiState.update { currentState ->
                     currentState.copy(
                         selectedConnectionId = connection.id,
-                        draftIndexaToken = "",
-                        isConnectingIndexa = false,
-                        indexaConnectionMessage = "Saved ${connection.displayName}. Run Sync now to import those discovered Indexa accounts into the local ledger.",
-                        indexaConnectionError = null,
+                        providerStates = currentState.providerStates.updated(providerId) { providerState ->
+                            providerState.copy(
+                                draftSecret = "",
+                                preview = null,
+                                isConnecting = false,
+                                message = "Saved ${connection.displayName}. Run Sync now to import the discovered provider accounts into the local ledger.",
+                                error = null,
+                            )
+                        },
                     )
                 }
             }.onFailure { throwable ->
                 _uiState.update { currentState ->
                     currentState.copy(
-                        isConnectingIndexa = false,
-                        indexaConnectionMessage = null,
-                        indexaConnectionError = throwable.message ?: "Indexa connection setup failed.",
+                        providerStates = currentState.providerStates.updated(providerId) { providerState ->
+                            providerState.copy(
+                                isConnecting = false,
+                                message = null,
+                                error = throwable.message ?: "$providerName connection setup failed.",
+                            )
+                        },
                     )
                 }
             }
         }
     }
 
-    fun runIndexaSync() {
+    fun runProviderSync(providerId: ExternalProviderId) {
+        val connector = providerConnectors[providerId] ?: return
+        val providerName = providerDisplayName(providerId)
         val connectionId = uiState.value.selectedConnection
-            ?.takeIf { connection -> connection.providerId == ExternalProviderId.INDEXA }
+            ?.takeIf { connection -> connection.providerId == providerId }
             ?.id
             ?: uiState.value.connections.firstOrNull { connection ->
-                connection.providerId == ExternalProviderId.INDEXA
+                connection.providerId == providerId
             }?.id
 
         if (connectionId == null) {
-            _uiState.update { currentState ->
-                currentState.copy(
-                    indexaConnectionError = "Save the Indexa connection before running sync.",
-                    indexaConnectionMessage = null,
-                )
-            }
+            setProviderError(providerId, "Save the $providerName connection before running sync.")
             return
         }
 
         viewModelScope.launch {
             _uiState.update { currentState ->
                 currentState.copy(
-                    isSyncingIndexa = true,
-                    indexaConnectionError = null,
-                    indexaConnectionMessage = null,
+                    providerStates = currentState.providerStates.updated(providerId) { providerState ->
+                        providerState.copy(
+                            isSyncing = true,
+                            message = null,
+                            error = null,
+                        )
+                    },
                 )
             }
 
             runCatching {
-                indexaIntegrationService.runSync(connectionId)
+                connector.runSync(connectionId)
             }.onSuccess { syncRun ->
                 _uiState.update { currentState ->
                     currentState.copy(
-                        isSyncingIndexa = false,
-                        indexaConnectionMessage = syncRun.message
-                            ?: "Indexa sync completed successfully.",
-                        indexaConnectionError = null,
+                        providerStates = currentState.providerStates.updated(providerId) { providerState ->
+                            providerState.copy(
+                                isSyncing = false,
+                                message = syncRun.message ?: "$providerName sync completed successfully.",
+                                error = null,
+                            )
+                        },
                     )
                 }
             }.onFailure { throwable ->
                 _uiState.update { currentState ->
                     currentState.copy(
-                        isSyncingIndexa = false,
-                        indexaConnectionMessage = null,
-                        indexaConnectionError = throwable.message ?: "Indexa sync failed.",
+                        providerStates = currentState.providerStates.updated(providerId) { providerState ->
+                            providerState.copy(
+                                isSyncing = false,
+                                message = null,
+                                error = throwable.message ?: "$providerName sync failed.",
+                            )
+                        },
                     )
                 }
             }
@@ -352,8 +381,6 @@ class SettingsViewModel(
             currentState.copy(
                 selectedConnectionId = connection.id,
                 disconnectConfirmationConnectionId = connection.id,
-                indexaConnectionError = null,
-                indexaConnectionMessage = null,
             )
         }
     }
@@ -368,15 +395,14 @@ class SettingsViewModel(
         val snapshot = uiState.value
         val connectionId = snapshot.disconnectConfirmationConnectionId ?: return
         val connection = snapshot.connections.firstOrNull { item -> item.id == connectionId } ?: return
+        val connector = providerConnectors[connection.providerId]
 
-        if (connection.providerId != ExternalProviderId.INDEXA) {
-            _uiState.update { currentState ->
-                currentState.copy(
-                    disconnectConfirmationConnectionId = null,
-                    indexaConnectionError = "Disconnect is not implemented for this provider yet.",
-                    indexaConnectionMessage = null,
-                )
-            }
+        if (connector == null) {
+            setProviderError(
+                providerId = connection.providerId,
+                error = "Disconnect is not implemented for this provider yet.",
+                clearDisconnectDialog = true,
+            )
             return
         }
 
@@ -385,13 +411,17 @@ class SettingsViewModel(
                 currentState.copy(
                     disconnectConfirmationConnectionId = null,
                     pendingDisconnectConnectionId = connectionId,
-                    indexaConnectionError = null,
-                    indexaConnectionMessage = null,
+                    providerStates = currentState.providerStates.updated(connection.providerId) { providerState ->
+                        providerState.copy(
+                            message = null,
+                            error = null,
+                        )
+                    },
                 )
             }
 
             runCatching {
-                indexaIntegrationService.disconnect(connectionId)
+                connector.disconnect(connectionId)
             }.onSuccess {
                 _uiState.update { currentState ->
                     currentState.copy(
@@ -399,19 +429,36 @@ class SettingsViewModel(
                         selectedConnectionId = currentState.connections
                             .firstOrNull { item -> item.id != connectionId }
                             ?.id,
-                        indexaConnectionMessage = "Disconnected ${connection.displayName}. Imported local accounts and transactions were kept in the ledger.",
-                        indexaConnectionError = null,
+                        providerStates = currentState.providerStates.updated(connection.providerId) { providerState ->
+                            providerState.copy(
+                                message = "Disconnected ${connection.displayName}. Imported local accounts and transactions were kept in the ledger.",
+                                error = null,
+                            )
+                        },
                     )
                 }
             }.onFailure { throwable ->
                 _uiState.update { currentState ->
                     currentState.copy(
                         pendingDisconnectConnectionId = null,
-                        indexaConnectionMessage = null,
-                        indexaConnectionError = throwable.message ?: "Disconnect failed.",
+                        providerStates = currentState.providerStates.updated(connection.providerId) { providerState ->
+                            providerState.copy(
+                                message = null,
+                                error = throwable.message ?: "Disconnect failed.",
+                            )
+                        },
                     )
                 }
             }
+        }
+    }
+
+    fun onNameChange(value: String) {
+        _uiState.update { currentState ->
+            currentState.copy(
+                draftName = value,
+                errorMessage = null,
+            )
         }
     }
 
@@ -500,9 +547,7 @@ class SettingsViewModel(
             )
 
             _uiState.update { currentState ->
-                currentState.toCreateMode().copy(
-                    isSaving = false,
-                )
+                currentState.toCreateMode().copy(isSaving = false)
             }
         }
     }
@@ -572,6 +617,24 @@ class SettingsViewModel(
             }
         }
     }
+
+    private fun setProviderError(
+        providerId: ExternalProviderId,
+        error: String,
+        clearDisconnectDialog: Boolean = false,
+    ) {
+        _uiState.update { currentState ->
+            currentState.copy(
+                disconnectConfirmationConnectionId = if (clearDisconnectDialog) null else currentState.disconnectConfirmationConnectionId,
+                providerStates = currentState.providerStates.updated(providerId) { providerState ->
+                    providerState.copy(
+                        message = null,
+                        error = error,
+                    )
+                },
+            )
+        }
+    }
 }
 
 private data class SettingsCombinedState(
@@ -590,6 +653,31 @@ private fun SettingsUiState.toCreateMode(): SettingsUiState =
         pendingDeleteCategoryId = null,
         errorMessage = null,
     )
+
+private fun defaultProviderStates(): Map<ExternalProviderId, ProviderConnectionUiState> =
+    ExternalProviderCatalog.availableProviders.associate { provider ->
+        provider.id to ProviderConnectionUiState()
+    }
+
+private fun ensureAllProviderStates(
+    currentStates: Map<ExternalProviderId, ProviderConnectionUiState>,
+): Map<ExternalProviderId, ProviderConnectionUiState> =
+    defaultProviderStates() + currentStates
+
+private fun Map<ExternalProviderId, ProviderConnectionUiState>.updated(
+    providerId: ExternalProviderId,
+    update: (ProviderConnectionUiState) -> ProviderConnectionUiState,
+): Map<ExternalProviderId, ProviderConnectionUiState> =
+    this + (providerId to update(this[providerId] ?: ProviderConnectionUiState()))
+
+internal fun SettingsUiState.providerState(
+    providerId: ExternalProviderId,
+): ProviderConnectionUiState = providerStates[providerId] ?: ProviderConnectionUiState()
+
+private fun providerDisplayName(providerId: ExternalProviderId): String =
+    ExternalProviderCatalog.availableProviders.firstOrNull { provider ->
+        provider.id == providerId
+    }?.displayName ?: providerId.name.lowercase().replaceFirstChar(Char::uppercase)
 
 internal fun generateCategoryId(
     name: String,

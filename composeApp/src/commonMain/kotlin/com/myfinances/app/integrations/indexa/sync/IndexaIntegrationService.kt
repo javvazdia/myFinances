@@ -1,18 +1,23 @@
 package com.myfinances.app.integrations.indexa.sync
 
 import com.myfinances.app.domain.model.integration.ExternalConnection
+import com.myfinances.app.domain.model.integration.ExternalConnectionPreview
+import com.myfinances.app.domain.model.integration.ExternalProviderId
 import com.myfinances.app.domain.model.integration.ExternalSyncRun
-import com.myfinances.app.integrations.indexa.model.IndexaConnectionPreview
+import com.myfinances.app.integrations.ExternalProviderConnector
 import com.myfinances.app.integrations.indexa.model.IndexaPerformanceHistory
 
-interface IndexaIntegrationService {
-    suspend fun testConnection(accessToken: String): IndexaConnectionPreview
+interface IndexaIntegrationService : ExternalProviderConnector {
+    override val providerId: ExternalProviderId
+        get() = ExternalProviderId.INDEXA
 
-    suspend fun connect(accessToken: String): ExternalConnection
+    override suspend fun testConnection(secret: String): ExternalConnectionPreview
 
-    suspend fun runSync(connectionId: String): ExternalSyncRun
+    override suspend fun connect(secret: String): ExternalConnection
 
-    suspend fun disconnect(connectionId: String)
+    override suspend fun runSync(connectionId: String): ExternalSyncRun
+
+    override suspend fun disconnect(connectionId: String)
 
     suspend fun fetchPerformanceHistory(localAccountId: String): IndexaPerformanceHistory?
 }
