@@ -26,7 +26,7 @@ import kotlin.random.Random
 import kotlin.time.Clock
 
 data class ProviderConnectionUiState(
-    val draftSecret: String = "",
+    val draftFields: Map<String, String> = emptyMap(),
     val preview: ExternalConnectionPreview? = null,
     val isTesting: Boolean = false,
     val isConnecting: Boolean = false,
@@ -186,8 +186,9 @@ class SettingsViewModel(
         }
     }
 
-    fun onProviderSecretChange(
+    fun onProviderFieldChange(
         providerId: ExternalProviderId,
+        fieldId: String,
         value: String,
     ) {
         _uiState.update { currentState ->
@@ -196,7 +197,7 @@ class SettingsViewModel(
                     providerId = providerId,
                 ) { providerState ->
                     providerState.copy(
-                        draftSecret = value,
+                        draftFields = providerState.draftFields + (fieldId to value),
                         preview = null,
                         message = null,
                         error = null,
@@ -209,9 +210,9 @@ class SettingsViewModel(
     fun testProviderConnection(providerId: ExternalProviderId) {
         val connector = providerConnectors[providerId] ?: return
         val providerName = providerDisplayName(providerId)
-        val secret = uiState.value.providerState(providerId).draftSecret.trim()
-        if (secret.isBlank()) {
-            setProviderError(providerId, "Paste a $providerName credential first.")
+        val credentials = uiState.value.providerState(providerId).draftFields
+        if (!providerCredentialsReady(providerId, credentials)) {
+            setProviderError(providerId, "Complete the required $providerName credential fields first.")
             return
         }
 
@@ -229,7 +230,7 @@ class SettingsViewModel(
             }
 
             runCatching {
-                connector.testConnection(secret)
+                connector.testConnection(credentials)
             }.onSuccess { preview ->
                 _uiState.update { currentState ->
                     currentState.copy(
@@ -263,9 +264,9 @@ class SettingsViewModel(
     fun connectProvider(providerId: ExternalProviderId) {
         val connector = providerConnectors[providerId] ?: return
         val providerName = providerDisplayName(providerId)
-        val secret = uiState.value.providerState(providerId).draftSecret.trim()
-        if (secret.isBlank()) {
-            setProviderError(providerId, "Paste a $providerName credential first.")
+        val credentials = uiState.value.providerState(providerId).draftFields
+        if (!providerCredentialsReady(providerId, credentials)) {
+            setProviderError(providerId, "Complete the required $providerName credential fields first.")
             return
         }
 
@@ -283,14 +284,14 @@ class SettingsViewModel(
             }
 
             runCatching {
-                connector.connect(secret)
+                connector.connect(credentials)
             }.onSuccess { connection ->
                 _uiState.update { currentState ->
                     currentState.copy(
                         selectedConnectionId = connection.id,
                         providerStates = currentState.providerStates.updated(providerId) { providerState ->
                             providerState.copy(
-                                draftSecret = "",
+                                draftFields = emptyMap(),
                                 preview = null,
                                 isConnecting = false,
                                 message = "Saved ${connection.displayName}. Run Sync now to import the discovered provider accounts into the local ledger.",
@@ -674,10 +675,26 @@ internal fun SettingsUiState.providerState(
     providerId: ExternalProviderId,
 ): ProviderConnectionUiState = providerStates[providerId] ?: ProviderConnectionUiState()
 
+internal fun ProviderConnectionUiState.fieldValue(fieldId: String): String =
+    draftFields[fieldId].orEmpty()
+
 private fun providerDisplayName(providerId: ExternalProviderId): String =
     ExternalProviderCatalog.availableProviders.firstOrNull { provider ->
         provider.id == providerId
     }?.displayName ?: providerId.name.lowercase().replaceFirstChar(Char::uppercase)
+
+private fun providerCredentialsReady(
+    providerId: ExternalProviderId,
+    credentials: Map<String, String>,
+): Boolean {
+    val provider = ExternalProviderCatalog.availableProviders.firstOrNull { definition ->
+        definition.id == providerId
+    } ?: return false
+
+    return provider.credentialFields
+        .filter { field -> field.required }
+        .all { field -> credentials[field.id]?.trim().isNullOrEmpty().not() }
+}
 
 internal fun generateCategoryId(
     name: String,

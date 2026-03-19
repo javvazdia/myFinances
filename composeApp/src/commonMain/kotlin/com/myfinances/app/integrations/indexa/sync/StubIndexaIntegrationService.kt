@@ -33,8 +33,8 @@ class StubIndexaIntegrationService(
     private val externalConnectionsRepository: ExternalConnectionsRepository,
     private val connectionSecretStore: ConnectionSecretStore,
 ) : IndexaIntegrationService {
-    override suspend fun testConnection(secret: String): ExternalConnectionPreview =
-        fetchConnectionPreview(secret).toExternalConnectionPreview()
+    override suspend fun testConnection(credentials: Map<String, String>): ExternalConnectionPreview =
+        fetchConnectionPreview(credentials.requiredIndexaToken()).toExternalConnectionPreview()
 
     private suspend fun fetchConnectionPreview(accessToken: String): IndexaConnectionPreview {
         val profile = apiClient.fetchUserProfile(accessToken)
@@ -44,7 +44,8 @@ class StubIndexaIntegrationService(
         )
     }
 
-    override suspend fun connect(secret: String): ExternalConnection {
+    override suspend fun connect(credentials: Map<String, String>): ExternalConnection {
+        val secret = credentials.requiredIndexaToken()
         val preview = fetchConnectionPreview(secret)
         val now = Clock.System.now().toEpochMilliseconds()
         val existingConnection = externalConnectionsRepository
@@ -498,6 +499,10 @@ private fun buildInvestmentPositionId(
 
     return "position-$accountId-$slug-$index"
 }
+
+private fun Map<String, String>.requiredIndexaToken(): String =
+    this["token"]?.trim()?.takeIf(String::isNotBlank)
+        ?: error("Paste an Indexa API token first.")
 
 private fun IndexaConnectionPreview.toExternalConnectionPreview(): ExternalConnectionPreview =
     ExternalConnectionPreview(

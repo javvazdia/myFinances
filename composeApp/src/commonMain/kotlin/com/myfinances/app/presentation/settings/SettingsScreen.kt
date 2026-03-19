@@ -26,7 +26,7 @@ import com.myfinances.app.domain.model.integration.ExternalProviderId
 fun SettingsScreen(
     uiState: SettingsUiState,
     onSelectConnection: (String) -> Unit,
-    onProviderSecretChange: (ExternalProviderId, String) -> Unit,
+    onProviderFieldChange: (ExternalProviderId, String, String) -> Unit,
     onTestProviderConnection: (ExternalProviderId) -> Unit,
     onConnectProvider: (ExternalProviderId) -> Unit,
     onRunProviderSync: (ExternalProviderId) -> Unit,
@@ -76,7 +76,7 @@ fun SettingsScreen(
             ConnectionsOverviewCard(
                 uiState = uiState,
                 onSelectConnection = onSelectConnection,
-                onProviderSecretChange = onProviderSecretChange,
+                onProviderFieldChange = onProviderFieldChange,
                 onTestProviderConnection = onTestProviderConnection,
                 onConnectProvider = onConnectProvider,
                 onRunProviderSync = onRunProviderSync,

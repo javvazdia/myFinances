@@ -8,10 +8,19 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuAnchorType
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -19,6 +28,8 @@ import com.myfinances.app.domain.model.integration.ExternalAccountLink
 import com.myfinances.app.domain.model.integration.ExternalConnection
 import com.myfinances.app.domain.model.integration.ExternalConnectionPreview
 import com.myfinances.app.domain.model.integration.ExternalConnectionStatus
+import com.myfinances.app.domain.model.integration.ExternalCredentialFieldDefinition
+import com.myfinances.app.domain.model.integration.ExternalCredentialInputType
 import com.myfinances.app.domain.model.integration.ExternalDiscoveredAccountPreview
 import com.myfinances.app.domain.model.integration.ExternalIntegrationStage
 import com.myfinances.app.domain.model.integration.ExternalProviderCatalog
@@ -32,7 +43,7 @@ import com.myfinances.app.presentation.shared.formatTimestampLabel
 internal fun ConnectionsOverviewCard(
     uiState: SettingsUiState,
     onSelectConnection: (String) -> Unit,
-    onProviderSecretChange: (ExternalProviderId, String) -> Unit,
+    onProviderFieldChange: (ExternalProviderId, String, String) -> Unit,
     onTestProviderConnection: (ExternalProviderId) -> Unit,
     onConnectProvider: (ExternalProviderId) -> Unit,
     onRunProviderSync: (ExternalProviderId) -> Unit,
@@ -83,7 +94,7 @@ internal fun ConnectionsOverviewCard(
                             ?.let { activeConnection -> uiState.syncRunsByConnection[activeConnection.id].orEmpty() }
                             .orEmpty(),
                         pendingDisconnectConnectionId = uiState.pendingDisconnectConnectionId,
-                        onSecretChange = onProviderSecretChange,
+                        onFieldChange = onProviderFieldChange,
                         onTestConnection = onTestProviderConnection,
                         onConnect = onConnectProvider,
                         onRunSync = onRunProviderSync,
@@ -104,7 +115,7 @@ private fun ProviderSetupCard(
     accountLinks: List<ExternalAccountLink>,
     syncRuns: List<ExternalSyncRun>,
     pendingDisconnectConnectionId: String?,
-    onSecretChange: (ExternalProviderId, String) -> Unit,
+    onFieldChange: (ExternalProviderId, String, String) -> Unit,
     onTestConnection: (ExternalProviderId) -> Unit,
     onConnect: (ExternalProviderId) -> Unit,
     onRunSync: (ExternalProviderId) -> Unit,
@@ -133,17 +144,15 @@ private fun ProviderSetupCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
-            OutlinedTextField(
-                value = providerState.draftSecret,
-                onValueChange = { value -> onSecretChange(provider.id, value) },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text(provider.credentialLabel ?: "Credential") },
-                supportingText = {
-                    Text(provider.credentialSupportingText ?: "Provide the secret needed to connect this provider.")
-                },
-                singleLine = true,
-                enabled = !providerState.isTesting && !providerState.isConnecting && !providerState.isSyncing,
-            )
+            provider.credentialFields.forEach { field ->
+                ProviderCredentialField(
+                    providerId = provider.id,
+                    field = field,
+                    value = providerState.fieldValue(field.id),
+                    enabled = !providerState.isTesting && !providerState.isConnecting && !providerState.isSyncing,
+                    onFieldChange = onFieldChange,
+                )
+            }
 
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Button(
@@ -158,7 +167,7 @@ private fun ProviderSetupCard(
                     enabled = !providerState.isTesting &&
                         !providerState.isConnecting &&
                         !providerState.isSyncing &&
-                        providerState.draftSecret.isNotBlank(),
+                        providerHasRequiredCredentials(provider, providerState),
                 ) {
                     Text(if (providerState.isConnecting) "Connecting..." else "Save connection")
                 }
@@ -226,6 +235,73 @@ private fun ProviderSetupCard(
             }
         }
     }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ProviderCredentialField(
+    providerId: ExternalProviderId,
+    field: ExternalCredentialFieldDefinition,
+    value: String,
+    enabled: Boolean,
+    onFieldChange: (ExternalProviderId, String, String) -> Unit,
+) {
+    if (field.inputType == ExternalCredentialInputType.SELECT && field.options.isNotEmpty()) {
+        var expanded by remember { mutableStateOf(false) }
+
+        ExposedDropdownMenuBox(
+            expanded = expanded,
+            onExpandedChange = { expanded = !expanded && enabled },
+        ) {
+            OutlinedTextField(
+                value = field.options.firstOrNull { option -> option.value == value }?.label ?: "Select ${field.label}",
+                onValueChange = {},
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
+                readOnly = true,
+                enabled = enabled,
+                label = { Text(field.label) },
+                supportingText = {
+                    field.supportingText?.let { text ->
+                        Text(text)
+                    }
+                },
+                trailingIcon = {
+                    ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
+                },
+            )
+            ExposedDropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false },
+            ) {
+                field.options.forEach { option ->
+                    DropdownMenuItem(
+                        text = { Text(option.label) },
+                        onClick = {
+                            onFieldChange(providerId, field.id, option.value)
+                            expanded = false
+                        },
+                    )
+                }
+            }
+        }
+        return
+    }
+
+    OutlinedTextField(
+        value = value,
+        onValueChange = { nextValue -> onFieldChange(providerId, field.id, nextValue) },
+        modifier = Modifier.fillMaxWidth(),
+        label = { Text(field.label) },
+        supportingText = {
+            field.supportingText?.let { text ->
+                Text(text)
+            }
+        },
+        singleLine = true,
+        enabled = enabled,
+    )
 }
 
 @Composable
@@ -565,6 +641,13 @@ internal fun buildPreviewAccountSubtitle(previewAccount: ExternalDiscoveredAccou
 
     return "$type | $currency$balance"
 }
+
+private fun providerHasRequiredCredentials(
+    provider: ExternalProviderDefinition,
+    providerState: ProviderConnectionUiState,
+): Boolean = provider.credentialFields
+    .filter { field -> field.required }
+    .all { field -> providerState.fieldValue(field.id).isNotBlank() }
 
 private val ExternalIntegrationStage.label: String
     get() = when (this) {

@@ -207,7 +207,7 @@ class SettingsScreenTest {
     fun exposesDefaultProviderStateForAvailableProviders() {
         val providerState = SettingsUiState().providerState(ExternalProviderId.INDEXA)
 
-        assertEquals("", providerState.draftSecret)
+        assertEquals("", providerState.fieldValue("token"))
         assertEquals(false, providerState.isConnecting)
     }
 

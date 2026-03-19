@@ -48,6 +48,8 @@ fun buildAppDependencies(
     val cajaIngenierosApiClient: CajaIngenierosApiClient = StubCajaIngenierosApiClient()
     val cajaIngenierosIntegrationService = ScaffoldedCajaIngenierosIntegrationService(
         apiClient = cajaIngenierosApiClient,
+        externalConnectionsRepository = externalConnectionsRepository,
+        connectionSecretStore = connectionSecretStore,
     )
     val providerConnectors: Map<ExternalProviderId, ExternalProviderConnector> = mapOf(
         ExternalProviderId.INDEXA to indexaIntegrationService,

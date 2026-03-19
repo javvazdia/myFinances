@@ -14,6 +14,12 @@ enum class ExternalProviderCapability {
     MANUAL_SYNC,
 }
 
+enum class ExternalCredentialInputType {
+    TEXT,
+    SECRET,
+    SELECT,
+}
+
 enum class ExternalConnectionStatus {
     NOT_CONNECTED,
     NEEDS_ATTENTION,
@@ -43,6 +49,21 @@ data class ExternalProviderDefinition(
     val stage: ExternalIntegrationStage,
     val credentialLabel: String? = null,
     val credentialSupportingText: String? = null,
+    val credentialFields: List<ExternalCredentialFieldDefinition> = emptyList(),
+)
+
+data class ExternalCredentialFieldDefinition(
+    val id: String,
+    val label: String,
+    val supportingText: String? = null,
+    val inputType: ExternalCredentialInputType = ExternalCredentialInputType.TEXT,
+    val required: Boolean = true,
+    val options: List<ExternalCredentialOption> = emptyList(),
+)
+
+data class ExternalCredentialOption(
+    val value: String,
+    val label: String,
 )
 
 data class ExternalConnectionPreview(
@@ -113,6 +134,14 @@ object ExternalProviderCatalog {
             stage = ExternalIntegrationStage.ACTIVE,
             credentialLabel = "Indexa API token",
             credentialSupportingText = "Start with a personal read-only token from your Indexa account settings.",
+            credentialFields = listOf(
+                ExternalCredentialFieldDefinition(
+                    id = "token",
+                    label = "Indexa API token",
+                    supportingText = "Start with a personal read-only token from your Indexa account settings.",
+                    inputType = ExternalCredentialInputType.SECRET,
+                ),
+            ),
         ),
         ExternalProviderDefinition(
             id = ExternalProviderId.CAJA_INGENIEROS,
@@ -124,8 +153,37 @@ object ExternalProviderCatalog {
                 ExternalProviderCapability.MANUAL_SYNC,
             ),
             stage = ExternalIntegrationStage.SCAFFOLDED,
-            credentialLabel = null,
-            credentialSupportingText = null,
+            credentialLabel = "Caja Ingenieros app credentials",
+            credentialSupportingText = "Use the Sandbox or Production OAuth credentials created in the Caja Ingenieros developer portal.",
+            credentialFields = listOf(
+                ExternalCredentialFieldDefinition(
+                    id = "environment",
+                    label = "Environment",
+                    supportingText = "Use Sandbox first while we finish the live OAuth/account-discovery flow.",
+                    inputType = ExternalCredentialInputType.SELECT,
+                    options = listOf(
+                        ExternalCredentialOption(value = "sandbox", label = "Sandbox"),
+                        ExternalCredentialOption(value = "production", label = "Production"),
+                    ),
+                ),
+                ExternalCredentialFieldDefinition(
+                    id = "consumerKey",
+                    label = "Consumer key",
+                    supportingText = "OAuth consumer key from the Caja Ingenieros API Market app.",
+                ),
+                ExternalCredentialFieldDefinition(
+                    id = "consumerSecret",
+                    label = "Consumer secret",
+                    supportingText = "OAuth consumer secret generated for the Caja Ingenieros app.",
+                    inputType = ExternalCredentialInputType.SECRET,
+                ),
+                ExternalCredentialFieldDefinition(
+                    id = "appId",
+                    label = "App ID",
+                    supportingText = "Optional but useful for support and future live auth wiring.",
+                    required = false,
+                ),
+            ),
         ),
     )
 }

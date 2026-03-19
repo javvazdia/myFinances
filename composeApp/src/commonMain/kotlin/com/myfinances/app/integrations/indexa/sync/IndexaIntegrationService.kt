@@ -11,9 +11,9 @@ interface IndexaIntegrationService : ExternalProviderConnector {
     override val providerId: ExternalProviderId
         get() = ExternalProviderId.INDEXA
 
-    override suspend fun testConnection(secret: String): ExternalConnectionPreview
+    override suspend fun testConnection(credentials: Map<String, String>): ExternalConnectionPreview
 
-    override suspend fun connect(secret: String): ExternalConnection
+    override suspend fun connect(credentials: Map<String, String>): ExternalConnection
 
     override suspend fun runSync(connectionId: String): ExternalSyncRun
 

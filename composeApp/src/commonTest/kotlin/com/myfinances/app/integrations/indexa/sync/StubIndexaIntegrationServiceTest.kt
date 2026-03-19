@@ -45,7 +45,7 @@ class StubIndexaIntegrationServiceTest {
             connectionSecretStore = secretStore,
         )
 
-        val connection = service.connect("demo-token")
+        val connection = service.connect(mapOf("token" to "demo-token"))
 
         val savedSecret = secretStore.readSecret(
             providerId = ExternalProviderId.INDEXA,
@@ -74,7 +74,7 @@ class StubIndexaIntegrationServiceTest {
             connectionSecretStore = secretStore,
         )
 
-        val connection = service.connect("demo-token")
+        val connection = service.connect(mapOf("token" to "demo-token"))
 
         val syncRun = service.runSync(connection.id)
 
@@ -125,7 +125,7 @@ class StubIndexaIntegrationServiceTest {
             connectionSecretStore = secretStore,
         )
 
-        val connection = service.connect("demo-token")
+        val connection = service.connect(mapOf("token" to "demo-token"))
 
         val syncRun = service.runSync(connection.id)
         val importedCategories = ledgerRepository.observeCategories().first()

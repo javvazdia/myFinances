@@ -1,5 +1,21 @@
 package com.myfinances.app.integrations.cajaingenieros.model
 
+import kotlinx.serialization.Serializable
+
+@Serializable
+enum class CajaIngenierosEnvironment {
+    SANDBOX,
+    PRODUCTION,
+}
+
+@Serializable
+data class CajaIngenierosCredentialBundle(
+    val environment: CajaIngenierosEnvironment,
+    val consumerKey: String,
+    val consumerSecret: String,
+    val appId: String? = null,
+)
+
 data class CajaIngenierosRegistrationMetadata(
     val onboardingMode: String,
     val supportsSandbox: Boolean,

@@ -26,7 +26,7 @@ fun SettingsRoute(
     SettingsScreen(
         uiState = uiState,
         onSelectConnection = settingsViewModel::selectConnection,
-        onProviderSecretChange = settingsViewModel::onProviderSecretChange,
+        onProviderFieldChange = settingsViewModel::onProviderFieldChange,
         onTestProviderConnection = settingsViewModel::testProviderConnection,
         onConnectProvider = settingsViewModel::connectProvider,
         onRunProviderSync = settingsViewModel::runProviderSync,
