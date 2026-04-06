@@ -141,4 +141,16 @@ class TransactionsScreenTest {
 
         assertFalse(transaction.isProviderManaged())
     }
+
+    @Test
+    fun exposesInfiniteScrollFlagsFromTransactionLimit() {
+        val uiState = TransactionsUiState(
+            transactionLimit = INITIAL_TRANSACTION_PAGE_SIZE,
+            canLoadMoreTransactions = true,
+        )
+
+        assertEquals(INITIAL_TRANSACTION_PAGE_SIZE, uiState.transactionLimit)
+        assertTrue(uiState.canLoadMoreTransactions)
+        assertFalse(uiState.isLoadingMoreTransactions)
+    }
 }

@@ -10,11 +10,13 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -34,6 +36,7 @@ fun TransactionsScreen(
     onMerchantChange: (String) -> Unit,
     onNoteChange: (String) -> Unit,
     onSaveTransaction: () -> Unit,
+    onLoadMoreTransactions: () -> Unit,
     onShowTransactionDetails: (String) -> Unit,
     onDismissTransactionDetails: () -> Unit,
     onEditTransaction: (String) -> Unit,
@@ -46,6 +49,28 @@ fun TransactionsScreen(
     LaunchedEffect(uiState.editingTransactionId) {
         if (uiState.editingTransactionId != null) {
             listState.animateScrollToItem(index = 3)
+        }
+    }
+
+    LaunchedEffect(
+        listState,
+        uiState.recentTransactions.size,
+        uiState.canLoadMoreTransactions,
+        uiState.isLoadingMoreTransactions,
+    ) {
+        snapshotFlow {
+            val layoutInfo = listState.layoutInfo
+            val lastVisibleIndex = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+            lastVisibleIndex to layoutInfo.totalItemsCount
+        }.collect { (lastVisibleIndex, totalItemsCount) ->
+            if (
+                uiState.canLoadMoreTransactions &&
+                !uiState.isLoadingMoreTransactions &&
+                totalItemsCount > 0 &&
+                lastVisibleIndex >= totalItemsCount - 3
+            ) {
+                onLoadMoreTransactions()
+            }
         }
     }
 
@@ -127,6 +152,28 @@ fun TransactionsScreen(
                     isEditing = uiState.editingTransactionId == transaction.id,
                     isDeleting = uiState.pendingDeleteTransactionId == transaction.id,
                 )
+            }
+
+            if (uiState.isLoadingMoreTransactions) {
+                item {
+                    Card {
+                        CircularProgressIndicator(
+                            modifier = Modifier.padding(20.dp),
+                        )
+                    }
+                }
+            } else if (uiState.canLoadMoreTransactions) {
+                item {
+                    Card {
+                        Text(
+                            text = "Scroll down to load older transactions.",
+                            modifier = Modifier.padding(20.dp),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                        )
+                    }
+                }
             }
         }
     }

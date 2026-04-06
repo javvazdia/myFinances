@@ -12,20 +12,28 @@ import com.myfinances.app.integrations.statements.StatementImportResult
 import com.myfinances.app.integrations.statements.StatementImportService
 import com.myfinances.app.presentation.shared.formatDayLabel
 import com.myfinances.app.presentation.shared.formatMinorMoney
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlin.random.Random
 import kotlin.time.Clock
+
+internal const val INITIAL_TRANSACTION_PAGE_SIZE = 30
+private const val TRANSACTION_PAGE_SIZE_STEP = 30
 
 data class TransactionsUiState(
     val accounts: List<Account> = emptyList(),
     val categories: List<Category> = emptyList(),
     val transactions: List<FinanceTransaction> = emptyList(),
     val recentTransactions: List<TransactionCardUiModel> = emptyList(),
+    val transactionLimit: Int = INITIAL_TRANSACTION_PAGE_SIZE,
+    val canLoadMoreTransactions: Boolean = false,
+    val isLoadingMoreTransactions: Boolean = false,
     val isStatementImportSupported: Boolean = false,
     val isImportingStatement: Boolean = false,
     val importMessage: String? = null,
@@ -88,13 +96,23 @@ data class TransactionDetailRowUiModel(
     val value: String,
 )
 
+private data class TransactionCollectionSnapshot(
+    val accounts: List<Account>,
+    val categories: List<Category>,
+    val transactions: List<FinanceTransaction>,
+    val currentTransactionLimit: Int,
+)
+
+@OptIn(ExperimentalCoroutinesApi::class)
 class TransactionsViewModel(
     private val ledgerRepository: LedgerRepository,
     private val statementImportService: StatementImportService,
 ) : ViewModel() {
+    private val transactionLimit = MutableStateFlow(INITIAL_TRANSACTION_PAGE_SIZE)
     private val _uiState = MutableStateFlow(
         TransactionsUiState(
             isStatementImportSupported = statementImportService.isSupported,
+            transactionLimit = INITIAL_TRANSACTION_PAGE_SIZE,
         ),
     )
     val uiState: StateFlow<TransactionsUiState> = _uiState.asStateFlow()
@@ -104,11 +122,22 @@ class TransactionsViewModel(
             combine(
                 ledgerRepository.observeAccounts(),
                 ledgerRepository.observeCategories(),
-                ledgerRepository.observeRecentTransactions(limit = 20),
-            ) { accounts, categories, transactions ->
-                Triple(accounts, categories, transactions)
-            }.collect { (accounts, categories, transactions) ->
+                transactionLimit.flatMapLatest { limit ->
+                    ledgerRepository.observeRecentTransactions(limit)
+                },
+                transactionLimit,
+            ) { accounts, categories, transactions, currentTransactionLimit ->
+                TransactionCollectionSnapshot(
+                    accounts = accounts,
+                    categories = categories,
+                    transactions = transactions,
+                    currentTransactionLimit = currentTransactionLimit,
+                )
+            }.collect { snapshot ->
                 _uiState.update { currentState ->
+                    val accounts = snapshot.accounts
+                    val categories = snapshot.categories
+                    val transactions = snapshot.transactions
                     val nextEditingTransactionId = currentState.editingTransactionId
                         ?.takeIf { editingId ->
                             transactions.any { transaction -> transaction.id == editingId }
@@ -134,6 +163,9 @@ class TransactionsViewModel(
                         recentTransactions = transactions.map { transaction ->
                             transaction.toCardUiModel(accounts, categories)
                         },
+                        transactionLimit = snapshot.currentTransactionLimit,
+                        canLoadMoreTransactions = transactions.size >= snapshot.currentTransactionLimit,
+                        isLoadingMoreTransactions = false,
                         isStatementImportSupported = statementImportService.isSupported,
                         selectedAccountId = nextSelectedAccountId,
                         selectedCategoryId = nextSelectedCategoryId,
@@ -168,6 +200,20 @@ class TransactionsViewModel(
                     )
                 }
             }
+        }
+    }
+
+    fun loadMoreTransactions() {
+        val snapshot = uiState.value
+        if (snapshot.isLoadingMoreTransactions || !snapshot.canLoadMoreTransactions) return
+
+        val nextLimit = snapshot.transactionLimit + TRANSACTION_PAGE_SIZE_STEP
+        transactionLimit.value = nextLimit
+        _uiState.update { currentState ->
+            currentState.copy(
+                transactionLimit = nextLimit,
+                isLoadingMoreTransactions = true,
+            )
         }
     }
 

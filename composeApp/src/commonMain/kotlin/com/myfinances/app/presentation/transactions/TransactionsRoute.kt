@@ -29,6 +29,7 @@ fun TransactionsRoute(
         onMerchantChange = transactionsViewModel::onMerchantChange,
         onNoteChange = transactionsViewModel::onNoteChange,
         onSaveTransaction = transactionsViewModel::saveTransaction,
+        onLoadMoreTransactions = transactionsViewModel::loadMoreTransactions,
         onShowTransactionDetails = transactionsViewModel::showTransactionDetails,
         onDismissTransactionDetails = transactionsViewModel::dismissTransactionDetails,
         onEditTransaction = transactionsViewModel::editTransaction,
