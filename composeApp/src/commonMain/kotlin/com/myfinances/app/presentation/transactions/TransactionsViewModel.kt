@@ -8,6 +8,8 @@ import com.myfinances.app.domain.model.CategoryKind
 import com.myfinances.app.domain.model.FinanceTransaction
 import com.myfinances.app.domain.model.TransactionType
 import com.myfinances.app.domain.repository.LedgerRepository
+import com.myfinances.app.integrations.statements.StatementImportResult
+import com.myfinances.app.integrations.statements.StatementImportService
 import com.myfinances.app.presentation.shared.formatDayLabel
 import com.myfinances.app.presentation.shared.formatMinorMoney
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -24,6 +26,9 @@ data class TransactionsUiState(
     val categories: List<Category> = emptyList(),
     val transactions: List<FinanceTransaction> = emptyList(),
     val recentTransactions: List<TransactionCardUiModel> = emptyList(),
+    val isStatementImportSupported: Boolean = false,
+    val isImportingStatement: Boolean = false,
+    val importMessage: String? = null,
     val isFormVisible: Boolean = false,
     val selectedType: TransactionType = TransactionType.EXPENSE,
     val selectedAccountId: String? = null,
@@ -61,7 +66,7 @@ data class TransactionsUiState(
         }
 
     val isBusy: Boolean
-        get() = isSaving || pendingDeleteTransactionId != null
+        get() = isSaving || pendingDeleteTransactionId != null || isImportingStatement
 }
 
 data class TransactionCardUiModel(
@@ -85,8 +90,13 @@ data class TransactionDetailRowUiModel(
 
 class TransactionsViewModel(
     private val ledgerRepository: LedgerRepository,
+    private val statementImportService: StatementImportService,
 ) : ViewModel() {
-    private val _uiState = MutableStateFlow(TransactionsUiState())
+    private val _uiState = MutableStateFlow(
+        TransactionsUiState(
+            isStatementImportSupported = statementImportService.isSupported,
+        ),
+    )
     val uiState: StateFlow<TransactionsUiState> = _uiState.asStateFlow()
 
     init {
@@ -124,6 +134,7 @@ class TransactionsViewModel(
                         recentTransactions = transactions.map { transaction ->
                             transaction.toCardUiModel(accounts, categories)
                         },
+                        isStatementImportSupported = statementImportService.isSupported,
                         selectedAccountId = nextSelectedAccountId,
                         selectedCategoryId = nextSelectedCategoryId,
                         editingTransactionId = nextEditingTransactionId,
@@ -178,6 +189,47 @@ class TransactionsViewModel(
                 selectedAccountId = currentState.selectedAccountId,
                 selectedCategoryId = currentState.selectedCategoryId,
             )
+        }
+    }
+
+    fun importCajaIngenierosPdf() {
+        if (!statementImportService.isSupported) {
+            _uiState.update { currentState ->
+                currentState.copy(
+                    errorMessage = "PDF statement import is not available on this platform yet.",
+                )
+            }
+            return
+        }
+
+        viewModelScope.launch {
+            _uiState.update { currentState ->
+                currentState.copy(
+                    isImportingStatement = true,
+                    importMessage = null,
+                    errorMessage = null,
+                )
+            }
+
+            runCatching {
+                statementImportService.importCajaIngenierosPdf()
+            }.onSuccess { result ->
+                _uiState.update { currentState ->
+                    currentState.copy(
+                        isImportingStatement = false,
+                        importMessage = result?.let { importResult ->
+                            buildImportMessage(importResult)
+                        },
+                    )
+                }
+            }.onFailure { throwable ->
+                _uiState.update { currentState ->
+                    currentState.copy(
+                        isImportingStatement = false,
+                        errorMessage = throwable.message ?: "PDF import failed.",
+                    )
+                }
+            }
         }
     }
 
@@ -437,7 +489,7 @@ internal fun FinanceTransaction.toCardUiModel(
         categoryName = categoryName,
         amountLabel = buildSignedAmountLabel(amountMinor, currencyCode, isExpense),
         dateLabel = formatTransactionDateLabel(postedAtEpochMs),
-        sourceLabel = sourceProvider?.let { provider -> "Synced from $provider" },
+        sourceLabel = buildTransactionSourceLabel(),
         metadataPreview = buildTransactionMetadataPreview(),
         detailRows = buildTransactionDetailRows(accountName, categoryName),
         isProviderManaged = isProviderManaged,
@@ -449,6 +501,15 @@ private fun FinanceTransaction.buildTransactionMetadataPreview(): String? =
     note?.takeIf(String::isNotBlank)
         ?: externalTransactionId?.takeIf(String::isNotBlank)?.let { reference -> "Reference $reference" }
 
+private fun FinanceTransaction.buildTransactionSourceLabel(): String? =
+    sourceProvider?.takeIf(String::isNotBlank)?.let { provider ->
+        if (externalTransactionId.isNullOrBlank()) {
+            "Imported from $provider"
+        } else {
+            "Synced from $provider"
+        }
+    }
+
 private fun FinanceTransaction.buildTransactionDetailRows(
     accountName: String,
     categoryName: String,
@@ -457,8 +518,8 @@ private fun FinanceTransaction.buildTransactionDetailRows(
     add(TransactionDetailRowUiModel(label = "Category", value = categoryName))
     add(TransactionDetailRowUiModel(label = "Type", value = type.label))
     add(TransactionDetailRowUiModel(label = "Date", value = formatTransactionDateLabel(postedAtEpochMs)))
-    sourceProvider?.takeIf(String::isNotBlank)?.let { provider ->
-        add(TransactionDetailRowUiModel(label = "Source", value = "Synced from $provider"))
+    buildTransactionSourceLabel()?.let { sourceLabel ->
+        add(TransactionDetailRowUiModel(label = "Source", value = sourceLabel))
     }
     externalTransactionId?.takeIf(String::isNotBlank)?.let { reference ->
         add(TransactionDetailRowUiModel(label = "Reference", value = reference))
@@ -549,3 +610,10 @@ private fun TransactionsUiState.toCreateMode(): TransactionsUiState =
         pendingDeleteTransactionId = null,
         errorMessage = null,
     )
+
+private fun buildImportMessage(result: StatementImportResult): String =
+    if (result.skippedTransactions > 0) {
+        "Imported ${result.importedTransactions} transactions from ${result.sourceFileName} into ${result.accountName}. Skipped ${result.skippedTransactions} duplicates. Closing balance ${formatTransactionMoney(result.endingBalanceMinor, result.currencyCode)}."
+    } else {
+        "Imported ${result.importedTransactions} transactions from ${result.sourceFileName} into ${result.accountName}. Closing balance ${formatTransactionMoney(result.endingBalanceMinor, result.currencyCode)}."
+    }

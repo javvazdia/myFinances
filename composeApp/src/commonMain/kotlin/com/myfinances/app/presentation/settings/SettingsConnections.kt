@@ -81,7 +81,7 @@ internal fun ConnectionsOverviewCard(
                     isSelected = uiState.selectedConnectionId == connection?.id,
                 )
 
-                if (provider.stage == ExternalIntegrationStage.ACTIVE && provider.credentialLabel != null) {
+                if (provider.credentialFields.isNotEmpty()) {
                     ProviderSetupCard(
                         provider = provider,
                         providerState = providerState,
@@ -143,6 +143,10 @@ private fun ProviderSetupCard(
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+
+            if (provider.setupInstructions.isNotEmpty()) {
+                ProviderSetupInstructions(provider = provider)
+            }
 
             provider.credentialFields.forEach { field ->
                 ProviderCredentialField(
@@ -302,6 +306,44 @@ private fun ProviderCredentialField(
         singleLine = true,
         enabled = enabled,
     )
+}
+
+@Composable
+private fun ProviderSetupInstructions(provider: ExternalProviderDefinition) {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+        ),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(
+                text = "Setup notes",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+
+            provider.setupInstructions.forEachIndexed { index, instruction ->
+                Text(
+                    text = "${index + 1}. $instruction",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            if (!provider.documentationLabel.isNullOrBlank() && !provider.documentationUrl.isNullOrBlank()) {
+                Text(
+                    text = "${provider.documentationLabel}: ${provider.documentationUrl}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
 }
 
 @Composable
@@ -683,9 +725,13 @@ private fun buildConnectionStatusMessage(
                 "This provider is on the roadmap but not scaffolded yet."
             ExternalIntegrationStage.SCAFFOLDED ->
                 "The shared connection and sync foundation is ready. The next step is plugging in the live provider connector."
-            ExternalIntegrationStage.ACTIVE ->
-                "This provider is ready to be connected through the shared workflow."
-        }
+        ExternalIntegrationStage.ACTIVE ->
+            "This provider is ready to be connected through the shared workflow."
+    }
+}
+
+    if (connection.status == ExternalConnectionStatus.NEEDS_ATTENTION && !connection.lastErrorMessage.isNullOrBlank()) {
+        return connection.lastErrorMessage
     }
 
     return when (connection.lastSyncStatus) {

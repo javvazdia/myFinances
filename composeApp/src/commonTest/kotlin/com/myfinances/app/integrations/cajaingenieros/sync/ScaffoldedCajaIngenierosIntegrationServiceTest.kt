@@ -35,7 +35,8 @@ class ScaffoldedCajaIngenierosIntegrationServiceTest {
         val preview = service.testConnection(validCredentials)
 
         assertEquals("Caja Ingenieros (Sandbox)", preview.suggestedConnectionName)
-        assertTrue(preview.ownerLabel?.contains("Sandbox", ignoreCase = true) == true)
+        assertTrue(preview.ownerLabel!!.contains("Sandbox", ignoreCase = true))
+        assertTrue(preview.ownerLabel.contains("token", ignoreCase = true))
         assertTrue(preview.discoveredAccounts.isEmpty())
     }
 
@@ -45,24 +46,32 @@ class ScaffoldedCajaIngenierosIntegrationServiceTest {
         val savedSecret = secretStore.readSecret(
             providerId = ExternalProviderId.CAJA_INGENIEROS,
             connectionId = connection.id,
-        )
+        )!!
         val savedConnections = connectionsRepository.observeConnections().first()
 
-        assertEquals(ExternalConnectionStatus.NOT_CONNECTED, connection.status)
+        assertEquals(ExternalConnectionStatus.NEEDS_ATTENTION, connection.status)
         assertEquals(ExternalSyncStatus.IDLE, connection.lastSyncStatus)
         assertEquals(1, savedConnections.size)
-        assertTrue(savedSecret?.contains("sandbox-key") == true)
-        assertTrue(savedSecret?.contains("SANDBOX") == true)
+        assertTrue(savedSecret.contains("sandbox-key"))
+        assertTrue(savedSecret.contains("SANDBOX"))
+        assertTrue(connection.lastErrorMessage!!.contains("signed AIS requests", ignoreCase = true))
     }
 
     @Test
-    fun runSyncExplainsThatLiveOauthExchangeIsStillPending() = runTest {
+    fun runSyncExplainsThatLiveOauthExchangeIsStillPendingAndRecordsFailedRun() = runTest {
         val connection = service.connect(validCredentials)
 
         val error = assertFailsWith<IllegalStateException> {
             service.runSync(connection.id)
         }
+        val savedConnection = connectionsRepository.observeConnections().first().single()
+        val savedSyncRuns = connectionsRepository.observeSyncRuns(connection.id).first()
 
-        assertTrue(error.message!!.contains("OAuth token exchange", ignoreCase = true))
+        assertTrue(error.message!!.contains("signed AIS requests", ignoreCase = true))
+        assertEquals(ExternalConnectionStatus.NEEDS_ATTENTION, savedConnection.status)
+        assertEquals(ExternalSyncStatus.FAILED, savedConnection.lastSyncStatus)
+        assertEquals(1, savedSyncRuns.size)
+        assertEquals(ExternalSyncStatus.FAILED, savedSyncRuns.single().status)
+        assertTrue(savedSyncRuns.single().message!!.contains("Token scope", ignoreCase = true))
     }
 }

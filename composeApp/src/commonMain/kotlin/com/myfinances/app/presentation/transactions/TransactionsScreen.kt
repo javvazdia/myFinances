@@ -26,6 +26,7 @@ fun TransactionsScreen(
     uiState: TransactionsUiState,
     onShowCreateForm: () -> Unit,
     onHideTransactionForm: () -> Unit,
+    onImportCajaIngenierosPdf: () -> Unit,
     onTypeSelected: (TransactionType) -> Unit,
     onAccountSelected: (String) -> Unit,
     onCategorySelected: (String) -> Unit,
@@ -75,6 +76,7 @@ fun TransactionsScreen(
                 uiState = uiState,
                 onShowCreateForm = onShowCreateForm,
                 onHideTransactionForm = onHideTransactionForm,
+                onImportCajaIngenierosPdf = onImportCajaIngenierosPdf,
             )
         }
 

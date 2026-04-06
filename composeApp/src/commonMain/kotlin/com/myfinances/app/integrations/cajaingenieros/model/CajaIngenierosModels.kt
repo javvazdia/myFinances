@@ -16,6 +16,13 @@ data class CajaIngenierosCredentialBundle(
     val appId: String? = null,
 )
 
+data class CajaIngenierosAccessToken(
+    val accessToken: String,
+    val tokenType: String?,
+    val expiresInSeconds: Long?,
+    val scope: String?,
+)
+
 data class CajaIngenierosRegistrationMetadata(
     val onboardingMode: String,
     val supportsSandbox: Boolean,

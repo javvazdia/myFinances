@@ -32,10 +32,11 @@ class ScaffoldedCajaIngenierosIntegrationService(
     override suspend fun testConnection(credentials: Map<String, String>): ExternalConnectionPreview {
         val bundle = credentials.toCajaIngenierosCredentialBundle()
         val metadata = fetchRegistrationMetadata()
+        val token = apiClient.exchangeClientCredentialsToken(bundle)
 
         return ExternalConnectionPreview(
             suggestedConnectionName = buildSuggestedConnectionName(bundle.environment),
-            ownerLabel = "${metadata.onboardingMode} | ${bundle.environment.label}",
+            ownerLabel = "${metadata.onboardingMode} | ${bundle.environment.label} | ${token.tokenType ?: "Bearer"} token ready",
             discoveredAccounts = emptyList<ExternalDiscoveredAccountPreview>(),
         )
     }
@@ -52,12 +53,12 @@ class ScaffoldedCajaIngenierosIntegrationService(
             id = existingConnection?.id ?: "conn-caja-ingenieros-$now-${Random.nextInt(1000, 9999)}",
             providerId = ExternalProviderId.CAJA_INGENIEROS,
             displayName = buildSuggestedConnectionName(bundle.environment),
-            status = ExternalConnectionStatus.NOT_CONNECTED,
+            status = ExternalConnectionStatus.NEEDS_ATTENTION,
             externalUserId = null,
             lastSuccessfulSyncEpochMs = null,
             lastSyncAttemptEpochMs = now,
             lastSyncStatus = ExternalSyncStatus.IDLE,
-            lastErrorMessage = "Caja Ingenieros credentials saved. Live OAuth token exchange and account discovery are still pending.",
+            lastErrorMessage = pendingAuthorizationMessage(bundle.environment),
             createdAtEpochMs = existingConnection?.createdAtEpochMs ?: now,
             updatedAtEpochMs = now,
         )
@@ -74,9 +75,43 @@ class ScaffoldedCajaIngenierosIntegrationService(
 
     override suspend fun runSync(connectionId: String): ExternalSyncRun {
         val bundle = loadSavedCredentials(connectionId)
-        error(
-            "Caja Ingenieros credentials for ${bundle.environment.label} are saved, but the live OAuth token exchange and account discovery flow are not implemented yet.",
+        val token = apiClient.exchangeClientCredentialsToken(bundle)
+        val now = Clock.System.now().toEpochMilliseconds()
+        val message = buildPendingSyncMessage(
+            environment = bundle.environment,
+            scope = token.scope,
         )
+        val syncRun = ExternalSyncRun(
+            id = "sync-caja-ingenieros-$connectionId-$now-${Random.nextInt(1000, 9999)}",
+            connectionId = connectionId,
+            providerId = ExternalProviderId.CAJA_INGENIEROS,
+            startedAtEpochMs = now,
+            finishedAtEpochMs = now,
+            status = ExternalSyncStatus.FAILED,
+            importedAccounts = 0,
+            importedTransactions = 0,
+            importedPositions = 0,
+            message = message,
+        )
+        externalConnectionsRepository.recordSyncRun(syncRun)
+
+        val currentConnection = externalConnectionsRepository
+            .observeConnections()
+            .first()
+            .firstOrNull { connection -> connection.id == connectionId }
+            ?: error("Caja Ingenieros connection not found.")
+
+        externalConnectionsRepository.upsertConnection(
+            currentConnection.copy(
+                status = ExternalConnectionStatus.NEEDS_ATTENTION,
+                lastSyncAttemptEpochMs = now,
+                lastSyncStatus = ExternalSyncStatus.FAILED,
+                lastErrorMessage = message,
+                updatedAtEpochMs = now,
+            ),
+        )
+
+        error(message)
     }
 
     override suspend fun disconnect(connectionId: String) {
@@ -129,3 +164,14 @@ private val CajaIngenierosEnvironment.label: String
         CajaIngenierosEnvironment.SANDBOX -> "Sandbox"
         CajaIngenierosEnvironment.PRODUCTION -> "Production"
     }
+
+private fun pendingAuthorizationMessage(environment: CajaIngenierosEnvironment): String =
+    "Caja Ingenieros ${environment.label} credentials are saved. This connection still needs live OAuth verification plus signed AIS requests and PSU consent before account sync can run."
+
+private fun buildPendingSyncMessage(
+    environment: CajaIngenierosEnvironment,
+    scope: String?,
+): String {
+    val scopeLabel = scope?.takeIf { it.isNotBlank() }?.let { " Token scope: $it." }.orEmpty()
+    return "Caja Ingenieros ${environment.label} sync is still waiting for signed AIS requests and PSU consent. OAuth 2.0 credentials are working, but the published XS2A endpoints require Digest, Signature, date, and Bearer headers on live account calls.$scopeLabel"
+}

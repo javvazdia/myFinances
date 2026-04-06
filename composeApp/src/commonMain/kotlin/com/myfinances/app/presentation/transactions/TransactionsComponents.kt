@@ -43,28 +43,50 @@ internal fun TransactionActionsCard(
     uiState: TransactionsUiState,
     onShowCreateForm: () -> Unit,
     onHideTransactionForm: () -> Unit,
+    onImportCajaIngenierosPdf: () -> Unit,
 ) {
     Card {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(16.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            if (!uiState.isFormVisible) {
-                Button(
-                    onClick = onShowCreateForm,
-                    enabled = !uiState.isBusy,
-                ) {
-                    Text("Create transaction")
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                if (!uiState.isFormVisible) {
+                    Button(
+                        onClick = onShowCreateForm,
+                        enabled = !uiState.isBusy,
+                    ) {
+                        Text("Create transaction")
+                    }
+                } else {
+                    Button(
+                        onClick = onHideTransactionForm,
+                        enabled = !uiState.isBusy,
+                    ) {
+                        Text(if (uiState.isEditing) "Cancel editing" else "Hide form")
+                    }
                 }
-            } else {
-                Button(
-                    onClick = onHideTransactionForm,
-                    enabled = !uiState.isBusy,
-                ) {
-                    Text(if (uiState.isEditing) "Cancel editing" else "Hide form")
+
+                if (uiState.isStatementImportSupported) {
+                    Button(
+                        onClick = onImportCajaIngenierosPdf,
+                        enabled = !uiState.isBusy && !uiState.isImportingStatement,
+                    ) {
+                        Text(if (uiState.isImportingStatement) "Importing..." else "Import Caja PDF")
+                    }
                 }
+            }
+
+            uiState.importMessage?.let { importMessage ->
+                Text(
+                    text = importMessage,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
             }
         }
     }

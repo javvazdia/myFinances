@@ -49,6 +49,9 @@ data class ExternalProviderDefinition(
     val stage: ExternalIntegrationStage,
     val credentialLabel: String? = null,
     val credentialSupportingText: String? = null,
+    val setupInstructions: List<String> = emptyList(),
+    val documentationLabel: String? = null,
+    val documentationUrl: String? = null,
     val credentialFields: List<ExternalCredentialFieldDefinition> = emptyList(),
 )
 
@@ -134,6 +137,13 @@ object ExternalProviderCatalog {
             stage = ExternalIntegrationStage.ACTIVE,
             credentialLabel = "Indexa API token",
             credentialSupportingText = "Start with a personal read-only token from your Indexa account settings.",
+            setupInstructions = listOf(
+                "Generate a personal read-only token in your Indexa private area.",
+                "Paste the token here, test the connection, then save it locally.",
+                "Run Sync now to import accounts, holdings, and investment activity.",
+            ),
+            documentationLabel = "Indexa API docs",
+            documentationUrl = "https://indexacapital.com/en/api-rest-v1",
             credentialFields = listOf(
                 ExternalCredentialFieldDefinition(
                     id = "token",
@@ -155,6 +165,13 @@ object ExternalProviderCatalog {
             stage = ExternalIntegrationStage.SCAFFOLDED,
             credentialLabel = "Caja Ingenieros app credentials",
             credentialSupportingText = "Use the Sandbox or Production OAuth credentials created in the Caja Ingenieros developer portal.",
+            setupInstructions = listOf(
+                "Create or open your app in Caja Ingenieros API Market and copy the OAuth credentials for Sandbox or Production.",
+                "Save those credentials in myFinances to prepare the local connection profile.",
+                "Complete the Caja OAuth and consent flow externally once we wire the live token exchange and account discovery endpoints.",
+            ),
+            documentationLabel = "Caja Ingenieros API Market",
+            documentationUrl = "https://apimarket.caixaenginyers.com/",
             credentialFields = listOf(
                 ExternalCredentialFieldDefinition(
                     id = "environment",

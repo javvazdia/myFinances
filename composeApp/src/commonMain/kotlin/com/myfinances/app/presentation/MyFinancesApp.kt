@@ -80,6 +80,7 @@ fun MyFinancesApp(appDependencies: AppDependencies) {
             composable(AppDestination.Transactions.route) {
                 TransactionsRoute(
                     ledgerRepository = appDependencies.ledgerRepository,
+                    statementImportService = appDependencies.statementImportService,
                 )
             }
             composable(AppDestination.Budgets.route) {

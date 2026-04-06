@@ -6,12 +6,14 @@ import androidx.compose.runtime.getValue
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.myfinances.app.domain.model.TransactionType
 import com.myfinances.app.domain.repository.LedgerRepository
+import com.myfinances.app.integrations.statements.StatementImportService
 
 @Composable
 fun TransactionsRoute(
     ledgerRepository: LedgerRepository,
+    statementImportService: StatementImportService,
     transactionsViewModel: TransactionsViewModel = viewModel {
-        TransactionsViewModel(ledgerRepository)
+        TransactionsViewModel(ledgerRepository, statementImportService)
     },
 ) {
     val uiState by transactionsViewModel.uiState.collectAsState()
@@ -19,6 +21,7 @@ fun TransactionsRoute(
         uiState = uiState,
         onShowCreateForm = transactionsViewModel::showCreateForm,
         onHideTransactionForm = transactionsViewModel::hideTransactionForm,
+        onImportCajaIngenierosPdf = transactionsViewModel::importCajaIngenierosPdf,
         onTypeSelected = transactionsViewModel::onTypeSelected,
         onAccountSelected = transactionsViewModel::onAccountSelected,
         onCategorySelected = transactionsViewModel::onCategorySelected,
