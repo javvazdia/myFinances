@@ -4,6 +4,7 @@ import com.myfinances.app.domain.model.Account
 import com.myfinances.app.domain.model.AccountSourceType
 import com.myfinances.app.domain.model.Category
 import com.myfinances.app.domain.model.FinanceTransaction
+import com.myfinances.app.domain.model.OverviewPeriodFilter
 import com.myfinances.app.domain.model.OverviewSnapshot
 import com.myfinances.app.domain.model.RecentTransaction
 import com.myfinances.app.domain.model.TransactionType
@@ -12,7 +13,9 @@ import com.myfinances.app.domain.repository.FinanceRepository
 import com.myfinances.app.domain.repository.LedgerRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.datetime.DatePeriod
 import kotlinx.datetime.TimeZone
+import kotlinx.datetime.minus
 import kotlinx.datetime.toLocalDateTime
 import kotlin.time.Clock
 import kotlin.time.Instant
@@ -20,7 +23,11 @@ import kotlin.time.Instant
 class DefaultFinanceRepository(
     private val ledgerRepository: LedgerRepository,
 ) : FinanceRepository {
-    override fun observeOverview(): Flow<OverviewSnapshot> = combine(
+    override fun observeOverview(
+        period: OverviewPeriodFilter,
+        customStartEpochMs: Long?,
+        customEndEpochMs: Long?,
+    ): Flow<OverviewSnapshot> = combine(
         ledgerRepository.observeAccounts(),
         ledgerRepository.observeCategories(),
         ledgerRepository.observeAllTransactions(),
@@ -31,18 +38,20 @@ class DefaultFinanceRepository(
             accounts = accounts,
             transactions = allTransactions,
         ).values.sum()
-        val monthlyIncomeMinor = allTransactions
-            .filter { it.type == TransactionType.INCOME && isInCurrentMonth(it.postedAtEpochMs) }
-            .sumOf { it.amountMinor }
-        val monthlyExpenseMinor = allTransactions
-            .filter { it.type == TransactionType.EXPENSE && isInCurrentMonth(it.postedAtEpochMs) }
-            .sumOf { it.amountMinor }
+        val nowEpochMs = Clock.System.now().toEpochMilliseconds()
+        val cashFlow = calculateOverviewCashFlow(
+            transactions = allTransactions,
+            period = period,
+            customStartEpochMs = customStartEpochMs,
+            customEndEpochMs = customEndEpochMs,
+            nowEpochMs = nowEpochMs,
+        )
 
         OverviewSnapshot(
             totalBalance = formatMoney(totalBalanceMinor, "EUR"),
-            monthlyIncome = formatMoney(monthlyIncomeMinor, "EUR"),
-            monthlyExpenses = formatMoney(monthlyExpenseMinor, "EUR"),
-            savingsRate = formatSavingsRate(monthlyIncomeMinor, monthlyExpenseMinor),
+            income = formatMoney(cashFlow.incomeMinor, "EUR"),
+            expenses = formatMoney(cashFlow.expenseMinor, "EUR"),
+            savingsRate = formatSavingsRate(cashFlow.incomeMinor, cashFlow.expenseMinor),
             focusMessage = buildFocusMessage(accounts, allTransactions),
             recentTransactions = recentTransactions.map { transaction ->
                 val isExpense = transaction.type == TransactionType.EXPENSE
@@ -83,6 +92,40 @@ class DefaultFinanceRepository(
     }
 }
 
+internal data class OverviewCashFlow(
+    val incomeMinor: Long,
+    val expenseMinor: Long,
+)
+
+internal fun calculateOverviewCashFlow(
+    transactions: List<FinanceTransaction>,
+    period: OverviewPeriodFilter,
+    customStartEpochMs: Long? = null,
+    customEndEpochMs: Long? = null,
+    nowEpochMs: Long = Clock.System.now().toEpochMilliseconds(),
+): OverviewCashFlow {
+    val filteredTransactions = transactions.filter { transaction ->
+        isInOverviewPeriod(
+            epochMs = transaction.postedAtEpochMs,
+            period = period,
+            customStartEpochMs = customStartEpochMs,
+            customEndEpochMs = customEndEpochMs,
+            nowEpochMs = nowEpochMs,
+        )
+    }
+    val incomeMinor = filteredTransactions
+        .filter { it.type == TransactionType.INCOME }
+        .sumOf { it.amountMinor }
+    val expenseMinor = filteredTransactions
+        .filter { it.type == TransactionType.EXPENSE }
+        .sumOf { it.amountMinor }
+
+    return OverviewCashFlow(
+        incomeMinor = incomeMinor,
+        expenseMinor = expenseMinor,
+    )
+}
+
 private fun fallbackTitle(type: TransactionType): String = when (type) {
     TransactionType.INCOME -> "Income"
     TransactionType.EXPENSE -> "Expense"
@@ -90,14 +133,38 @@ private fun fallbackTitle(type: TransactionType): String = when (type) {
     TransactionType.ADJUSTMENT -> "Adjustment"
 }
 
-private fun isInCurrentMonth(epochMs: Long): Boolean {
-    val timeZone = TimeZone.currentSystemDefault()
-    val current = Instant
-        .fromEpochMilliseconds(Clock.System.now().toEpochMilliseconds())
-        .toLocalDateTime(timeZone)
-    val target = Instant.fromEpochMilliseconds(epochMs).toLocalDateTime(timeZone)
+internal fun isInOverviewPeriod(
+    epochMs: Long,
+    period: OverviewPeriodFilter,
+    customStartEpochMs: Long? = null,
+    customEndEpochMs: Long? = null,
+    nowEpochMs: Long = Clock.System.now().toEpochMilliseconds(),
+): Boolean {
+    if (period == OverviewPeriodFilter.ALL) return true
+    if (period == OverviewPeriodFilter.CUSTOM) {
+        val startEpoch = customStartEpochMs ?: return true
+        val endEpoch = customEndEpochMs ?: return true
+        return epochMs in startEpoch..endEpoch
+    }
 
-    return current.year == target.year && current.month == target.month
+    val timeZone = TimeZone.currentSystemDefault()
+    val currentDate = Instant
+        .fromEpochMilliseconds(nowEpochMs)
+        .toLocalDateTime(timeZone)
+        .date
+    val targetDate = Instant.fromEpochMilliseconds(epochMs).toLocalDateTime(timeZone).date
+
+    val cutoffDate = currentDate.minus(period.toDatePeriod())
+    return targetDate >= cutoffDate && targetDate <= currentDate
+}
+
+private fun OverviewPeriodFilter.toDatePeriod(): DatePeriod = when (this) {
+    OverviewPeriodFilter.ONE_MONTH -> DatePeriod(months = 1)
+    OverviewPeriodFilter.THREE_MONTHS -> DatePeriod(months = 3)
+    OverviewPeriodFilter.SIX_MONTHS -> DatePeriod(months = 6)
+    OverviewPeriodFilter.ONE_YEAR -> DatePeriod(years = 1)
+    OverviewPeriodFilter.CUSTOM -> DatePeriod()
+    OverviewPeriodFilter.ALL -> DatePeriod()
 }
 
 private fun formatSavingsRate(monthlyIncomeMinor: Long, monthlyExpenseMinor: Long): String {

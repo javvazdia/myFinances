@@ -60,6 +60,8 @@ import com.myfinances.app.domain.model.Account
 import com.myfinances.app.domain.model.AccountSourceType
 import com.myfinances.app.domain.model.AccountType
 import com.myfinances.app.domain.model.InvestmentPosition
+import com.myfinances.app.presentation.shared.MyFinancesDateRangePickerDialog
+import com.myfinances.app.presentation.shared.formatDateRangeLabel
 
 @Composable
 internal fun AccountActionsCard(
@@ -347,11 +349,14 @@ internal fun AccountDetailScreen(
     availableHistoryModes: List<AccountHistoryMode>,
     selectedHistoryMode: AccountHistoryMode,
     selectedHistoryRange: AccountHistoryRange,
+    customHistoryStartEpochMs: Long?,
+    customHistoryEndEpochMs: Long?,
     isLoadingHistory: Boolean,
     historyErrorMessage: String?,
     positions: List<InvestmentPosition>,
     onSelectHistoryMode: (AccountHistoryMode) -> Unit,
     onSelectHistoryRange: (AccountHistoryRange) -> Unit,
+    onApplyCustomHistoryRange: (Long, Long) -> Unit,
     onBack: () -> Unit,
     onEditAccount: (String) -> Unit,
     onRequestDeleteAccount: (String) -> Unit,
@@ -390,10 +395,13 @@ internal fun AccountDetailScreen(
                 availableModes = availableHistoryModes,
                 selectedMode = selectedHistoryMode,
                 selectedRange = selectedHistoryRange,
+                customStartEpochMs = customHistoryStartEpochMs,
+                customEndEpochMs = customHistoryEndEpochMs,
                 isLoading = isLoadingHistory,
                 errorMessage = historyErrorMessage,
                 onSelectMode = onSelectHistoryMode,
                 onSelectRange = onSelectHistoryRange,
+                onApplyCustomRange = onApplyCustomHistoryRange,
             )
         }
 
@@ -529,11 +537,16 @@ private fun AccountHistoryCard(
     availableModes: List<AccountHistoryMode>,
     selectedMode: AccountHistoryMode,
     selectedRange: AccountHistoryRange,
+    customStartEpochMs: Long?,
+    customEndEpochMs: Long?,
     isLoading: Boolean,
     errorMessage: String?,
     onSelectMode: (AccountHistoryMode) -> Unit,
     onSelectRange: (AccountHistoryRange) -> Unit,
+    onApplyCustomRange: (Long, Long) -> Unit,
 ) {
+    var isCustomRangePickerVisible by remember { mutableStateOf(false) }
+
     Card {
         Column(
             modifier = Modifier
@@ -570,13 +583,30 @@ private fun AccountHistoryCard(
             ) {
                 AccountHistoryRange.entries.forEach { range ->
                     val isSelected = range == selectedRange
+                    val label = if (range == AccountHistoryRange.CUSTOM) {
+                        formatDateRangeLabel(customStartEpochMs, customEndEpochMs)
+                    } else {
+                        range.label
+                    }
                     if (isSelected) {
-                        Button(onClick = { onSelectRange(range) }) {
-                            Text(range.label)
+                        Button(onClick = {
+                            if (range == AccountHistoryRange.CUSTOM) {
+                                isCustomRangePickerVisible = true
+                            } else {
+                                onSelectRange(range)
+                            }
+                        }) {
+                            Text(label)
                         }
                     } else {
-                        OutlinedButton(onClick = { onSelectRange(range) }) {
-                            Text(range.label)
+                        OutlinedButton(onClick = {
+                            if (range == AccountHistoryRange.CUSTOM) {
+                                isCustomRangePickerVisible = true
+                            } else {
+                                onSelectRange(range)
+                            }
+                        }) {
+                            Text(label)
                         }
                     }
                 }
@@ -616,6 +646,18 @@ private fun AccountHistoryCard(
                 }
             }
         }
+    }
+
+    if (isCustomRangePickerVisible) {
+        MyFinancesDateRangePickerDialog(
+            initialStartEpochMs = customStartEpochMs,
+            initialEndEpochMs = customEndEpochMs,
+            onDismiss = { isCustomRangePickerVisible = false },
+            onConfirm = { startEpochMs, endEpochMs ->
+                isCustomRangePickerVisible = false
+                onApplyCustomRange(startEpochMs, endEpochMs)
+            },
+        )
     }
 }
 
@@ -831,6 +873,7 @@ private val AccountHistoryRange.label: String
         AccountHistoryRange.SIX_MONTHS -> "6 months"
         AccountHistoryRange.ONE_YEAR -> "1 year"
         AccountHistoryRange.THREE_YEARS -> "3 years"
+        AccountHistoryRange.CUSTOM -> "Custom"
         AccountHistoryRange.ALL -> "All"
     }
 

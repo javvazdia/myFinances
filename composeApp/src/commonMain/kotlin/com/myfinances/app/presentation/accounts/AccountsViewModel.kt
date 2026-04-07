@@ -43,6 +43,8 @@ data class AccountsUiState(
     val accountHistoryCharts: Map<AccountHistoryMode, AccountHistoryChart> = emptyMap(),
     val selectedAccountHistoryMode: AccountHistoryMode = AccountHistoryMode.VALUE,
     val selectedAccountHistoryRange: AccountHistoryRange = AccountHistoryRange.ALL,
+    val customAccountHistoryStartEpochMs: Long? = null,
+    val customAccountHistoryEndEpochMs: Long? = null,
     val isLoadingAccountHistory: Boolean = false,
     val accountHistoryErrorMessage: String? = null,
     val draftName: String = "",
@@ -78,11 +80,23 @@ data class AccountsUiState(
 
     val selectedAccountHistoryChart: AccountHistoryChart?
         get() = accountHistoryCharts[selectedAccountHistoryMode]
-            ?.filteredBy(selectedAccountHistoryRange)
+            ?.filteredBy(
+                range = selectedAccountHistoryRange,
+                customStartEpochMs = customAccountHistoryStartEpochMs,
+                customEndEpochMs = customAccountHistoryEndEpochMs,
+            )
             ?: accountHistoryCharts[AccountHistoryMode.VALUE]
-                ?.filteredBy(selectedAccountHistoryRange)
+                ?.filteredBy(
+                    range = selectedAccountHistoryRange,
+                    customStartEpochMs = customAccountHistoryStartEpochMs,
+                    customEndEpochMs = customAccountHistoryEndEpochMs,
+                )
             ?: accountHistoryCharts.values.firstOrNull()
-                ?.filteredBy(selectedAccountHistoryRange)
+                ?.filteredBy(
+                    range = selectedAccountHistoryRange,
+                    customStartEpochMs = customAccountHistoryStartEpochMs,
+                    customEndEpochMs = customAccountHistoryEndEpochMs,
+                )
 
     val availableAccountHistoryModes: List<AccountHistoryMode>
         get() = AccountHistoryMode.entries.filter(accountHistoryCharts::containsKey)
@@ -106,6 +120,7 @@ enum class AccountHistoryRange {
     SIX_MONTHS,
     ONE_YEAR,
     THREE_YEARS,
+    CUSTOM,
     ALL,
 }
 
@@ -185,6 +200,8 @@ class AccountsViewModel(
                             accountHistoryCharts = emptyMap(),
                             selectedAccountHistoryMode = AccountHistoryMode.VALUE,
                             selectedAccountHistoryRange = AccountHistoryRange.ALL,
+                            customAccountHistoryStartEpochMs = null,
+                            customAccountHistoryEndEpochMs = null,
                             isLoadingAccountHistory = false,
                             accountHistoryErrorMessage = null,
                         )
@@ -268,6 +285,19 @@ class AccountsViewModel(
         }
     }
 
+    fun applyCustomAccountHistoryRange(
+        startEpochMs: Long,
+        endEpochMs: Long,
+    ) {
+        _uiState.update { currentState ->
+            currentState.copy(
+                selectedAccountHistoryRange = AccountHistoryRange.CUSTOM,
+                customAccountHistoryStartEpochMs = startEpochMs,
+                customAccountHistoryEndEpochMs = endEpochMs,
+            )
+        }
+    }
+
     fun saveAccount() {
         val snapshot = uiState.value
         val existingAccount = snapshot.editingAccount
@@ -333,6 +363,8 @@ class AccountsViewModel(
                 accountHistoryCharts = emptyMap(),
                 selectedAccountHistoryMode = AccountHistoryMode.VALUE,
                 selectedAccountHistoryRange = AccountHistoryRange.ALL,
+                customAccountHistoryStartEpochMs = null,
+                customAccountHistoryEndEpochMs = null,
                 isLoadingAccountHistory = false,
                 accountHistoryErrorMessage = null,
                 draftCurrencyCode = currentState.draftCurrencyCode,
@@ -411,6 +443,8 @@ class AccountsViewModel(
                 accountHistoryCharts = emptyMap(),
                 selectedAccountHistoryMode = AccountHistoryMode.VALUE,
                 selectedAccountHistoryRange = AccountHistoryRange.ALL,
+                customAccountHistoryStartEpochMs = null,
+                customAccountHistoryEndEpochMs = null,
                 isLoadingAccountHistory = false,
                 accountHistoryErrorMessage = null,
             )
@@ -496,6 +530,8 @@ class AccountsViewModel(
                     accountHistoryCharts = emptyMap(),
                     selectedAccountHistoryMode = AccountHistoryMode.VALUE,
                     selectedAccountHistoryRange = AccountHistoryRange.ALL,
+                    customAccountHistoryStartEpochMs = null,
+                    customAccountHistoryEndEpochMs = null,
                 )
             }
 
@@ -934,10 +970,19 @@ private fun formatHistoryDecimal(value: Double): String =
         .trimEnd('0')
         .trimEnd('.')
 
-internal fun AccountHistoryChart.filteredBy(range: AccountHistoryRange): AccountHistoryChart {
+internal fun AccountHistoryChart.filteredBy(
+    range: AccountHistoryRange,
+    customStartEpochMs: Long? = null,
+    customEndEpochMs: Long? = null,
+): AccountHistoryChart {
     if (range == AccountHistoryRange.ALL || points.isEmpty()) return this
 
-    val filteredPoints = filterHistoryPointsByRange(points, range)
+    val filteredPoints = filterHistoryPointsByRange(
+        points = points,
+        range = range,
+        customStartEpochMs = customStartEpochMs,
+        customEndEpochMs = customEndEpochMs,
+    )
     if (filteredPoints.isEmpty()) return this
 
     return buildAccountHistoryChart(
@@ -953,8 +998,18 @@ internal fun AccountHistoryChart.filteredBy(range: AccountHistoryRange): Account
 internal fun filterHistoryPointsByRange(
     points: List<AccountHistoryPoint>,
     range: AccountHistoryRange,
+    customStartEpochMs: Long? = null,
+    customEndEpochMs: Long? = null,
 ): List<AccountHistoryPoint> {
     if (points.isEmpty() || range == AccountHistoryRange.ALL) return points
+    if (range == AccountHistoryRange.CUSTOM) {
+        val startEpoch = customStartEpochMs ?: return points
+        val endEpoch = customEndEpochMs ?: return points
+        val inRangePoints = points.filter { point ->
+            point.timestampEpochMs in startEpoch..endEpoch
+        }
+        return inRangePoints.ifEmpty { points.takeLast(1) }
+    }
 
     val latestDate = Instant.fromEpochMilliseconds(points.maxOf(AccountHistoryPoint::timestampEpochMs))
         .toLocalDateTime(TimeZone.currentSystemDefault())
@@ -972,6 +1027,7 @@ private fun AccountHistoryRange.toDatePeriod(): DatePeriod = when (this) {
     AccountHistoryRange.SIX_MONTHS -> DatePeriod(months = 6)
     AccountHistoryRange.ONE_YEAR -> DatePeriod(years = 1)
     AccountHistoryRange.THREE_YEARS -> DatePeriod(years = 3)
+    AccountHistoryRange.CUSTOM -> DatePeriod()
     AccountHistoryRange.ALL -> DatePeriod()
 }
 
@@ -997,6 +1053,8 @@ private fun AccountsUiState.toCreateMode(): AccountsUiState =
         accountHistoryCharts = emptyMap(),
         selectedAccountHistoryMode = AccountHistoryMode.VALUE,
         selectedAccountHistoryRange = AccountHistoryRange.ALL,
+        customAccountHistoryStartEpochMs = null,
+        customAccountHistoryEndEpochMs = null,
         isLoadingAccountHistory = false,
         accountHistoryErrorMessage = null,
         draftName = "",

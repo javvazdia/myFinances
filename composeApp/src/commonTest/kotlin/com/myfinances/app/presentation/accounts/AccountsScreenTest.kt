@@ -268,6 +268,40 @@ class AccountsScreenTest {
         assertEquals(1, filtered.points.size)
         assertEquals("Jun 1, 2025", filtered.points.single().detailLabel)
     }
+
+    @Test
+    fun filtersHistoryPointsByCustomRange() {
+        val points = listOf(
+            AccountHistoryPoint(
+                axisLabel = "Jan 1",
+                detailLabel = "Jan 1, 2025",
+                timestampEpochMs = parseTestEpoch("2025-01-01"),
+                value = 100.0,
+            ),
+            AccountHistoryPoint(
+                axisLabel = "Mar 15",
+                detailLabel = "Mar 15, 2025",
+                timestampEpochMs = parseTestEpoch("2025-03-15"),
+                value = 120.0,
+            ),
+            AccountHistoryPoint(
+                axisLabel = "Apr 15",
+                detailLabel = "Apr 15, 2025",
+                timestampEpochMs = parseTestEpoch("2025-04-15"),
+                value = 130.0,
+            ),
+        )
+
+        val filtered = filterHistoryPointsByRange(
+            points = points,
+            range = AccountHistoryRange.CUSTOM,
+            customStartEpochMs = parseTestEpoch("2025-03-01"),
+            customEndEpochMs = parseTestEpoch("2025-03-31") + 86_400_000L - 1L,
+        )
+
+        assertEquals(1, filtered.size)
+        assertEquals("Mar 15, 2025", filtered.single().detailLabel)
+    }
 }
 
 private fun parseTestEpoch(isoDate: String): Long =

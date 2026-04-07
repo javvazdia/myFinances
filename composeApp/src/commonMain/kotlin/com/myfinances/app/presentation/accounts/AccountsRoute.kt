@@ -32,6 +32,7 @@ fun AccountsRoute(
         onSelectAccount = accountsViewModel::selectAccount,
         onSelectAccountHistoryMode = accountsViewModel::selectAccountHistoryMode,
         onSelectAccountHistoryRange = accountsViewModel::selectAccountHistoryRange,
+        onApplyCustomAccountHistoryRange = accountsViewModel::applyCustomAccountHistoryRange,
         onCloseAccountDetails = accountsViewModel::closeAccountDetails,
         onEditAccount = accountsViewModel::editAccount,
         onRequestDeleteAccount = accountsViewModel::requestDeleteAccount,
