@@ -49,6 +49,7 @@ class OverviewViewModel(
                     customStartEpochMs = customStartEpochMs.value,
                     customEndEpochMs = customEndEpochMs.value,
                     focusMessage = snapshot.focusMessage,
+                    history = snapshot.history,
                     recentTransactions = snapshot.recentTransactions,
                 )
             }

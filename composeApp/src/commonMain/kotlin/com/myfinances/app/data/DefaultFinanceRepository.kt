@@ -1,9 +1,14 @@
 package com.myfinances.app.data
 
 import com.myfinances.app.domain.model.Account
+import com.myfinances.app.domain.model.AccountType
 import com.myfinances.app.domain.model.AccountSourceType
+import com.myfinances.app.domain.model.AccountValuationSnapshot
 import com.myfinances.app.domain.model.Category
 import com.myfinances.app.domain.model.FinanceTransaction
+import com.myfinances.app.domain.model.OverviewHistory
+import com.myfinances.app.domain.model.OverviewHistoryLine
+import com.myfinances.app.domain.model.OverviewHistoryPoint
 import com.myfinances.app.domain.model.OverviewPeriodFilter
 import com.myfinances.app.domain.model.OverviewSnapshot
 import com.myfinances.app.domain.model.RecentTransaction
@@ -14,7 +19,9 @@ import com.myfinances.app.domain.repository.LedgerRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.datetime.DatePeriod
+import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
+import kotlinx.datetime.atStartOfDayIn
 import kotlinx.datetime.minus
 import kotlinx.datetime.toLocalDateTime
 import kotlin.time.Clock
@@ -31,8 +38,9 @@ class DefaultFinanceRepository(
         ledgerRepository.observeAccounts(),
         ledgerRepository.observeCategories(),
         ledgerRepository.observeAllTransactions(),
+        ledgerRepository.observeAllAccountValuationSnapshots(),
         ledgerRepository.observeRecentTransactions(limit = 5),
-    ) { accounts, categories, allTransactions, recentTransactions ->
+    ) { accounts, categories, allTransactions, allSnapshots, recentTransactions ->
         val categoryNames = categories.associateBy(Category::id)
         val totalBalanceMinor = calculateAccountCurrentBalances(
             accounts = accounts,
@@ -46,6 +54,15 @@ class DefaultFinanceRepository(
             customEndEpochMs = customEndEpochMs,
             nowEpochMs = nowEpochMs,
         )
+        val history = buildOverviewHistory(
+            accounts = accounts,
+            allTransactions = allTransactions,
+            allSnapshots = allSnapshots,
+            period = period,
+            customStartEpochMs = customStartEpochMs,
+            customEndEpochMs = customEndEpochMs,
+            nowEpochMs = nowEpochMs,
+        )
 
         OverviewSnapshot(
             totalBalance = formatMoney(totalBalanceMinor, "EUR"),
@@ -53,6 +70,7 @@ class DefaultFinanceRepository(
             expenses = formatMoney(cashFlow.expenseMinor, "EUR"),
             savingsRate = formatSavingsRate(cashFlow.incomeMinor, cashFlow.expenseMinor),
             focusMessage = buildFocusMessage(accounts, allTransactions),
+            history = history,
             recentTransactions = recentTransactions.map { transaction ->
                 val isExpense = transaction.type == TransactionType.EXPENSE
                 RecentTransaction(
@@ -92,10 +110,240 @@ class DefaultFinanceRepository(
     }
 }
 
+internal fun buildOverviewHistory(
+    accounts: List<Account>,
+    allTransactions: List<FinanceTransaction>,
+    allSnapshots: List<AccountValuationSnapshot>,
+    period: OverviewPeriodFilter,
+    customStartEpochMs: Long? = null,
+    customEndEpochMs: Long? = null,
+    nowEpochMs: Long = Clock.System.now().toEpochMilliseconds(),
+): OverviewHistory? {
+    val fullSeries = accounts.mapNotNull { account ->
+        buildOverviewLineForAccount(
+            account = account,
+            transactions = allTransactions.filter { transaction -> transaction.accountId == account.id },
+            snapshots = allSnapshots.filter { snapshot -> snapshot.accountId == account.id },
+        )
+    }
+
+    if (fullSeries.isEmpty()) return null
+
+    val filteredSeries = fullSeries.mapNotNull { line ->
+        val filteredPoints = filterOverviewHistoryPoints(
+            points = line.points,
+            period = period,
+            customStartEpochMs = customStartEpochMs,
+            customEndEpochMs = customEndEpochMs,
+            nowEpochMs = nowEpochMs,
+        )
+        if (filteredPoints.isEmpty()) null else line.copy(points = filteredPoints)
+    }
+
+    if (filteredSeries.isEmpty()) return null
+
+    val totalLine = buildTotalOverviewLine(filteredSeries) ?: return null
+    val lines = listOf(totalLine) + filteredSeries
+    val allValues = lines.flatMap { line -> line.points.map(OverviewHistoryPoint::valueMinor) }
+
+    return OverviewHistory(
+        currencyCode = "EUR",
+        lines = lines,
+        minimumLabel = formatMoney(allValues.minOrNull() ?: 0L, "EUR"),
+        maximumLabel = formatMoney(allValues.maxOrNull() ?: 0L, "EUR"),
+        startLabel = lines.first().points.first().axisLabel,
+        endLabel = lines.first().points.last().axisLabel,
+    )
+}
+
 internal data class OverviewCashFlow(
     val incomeMinor: Long,
     val expenseMinor: Long,
 )
+
+private fun buildOverviewLineForAccount(
+    account: Account,
+    transactions: List<FinanceTransaction>,
+    snapshots: List<AccountValuationSnapshot>,
+): OverviewHistoryLine? {
+    val points = if (
+        account.sourceType == AccountSourceType.API_SYNC &&
+        account.type == AccountType.INVESTMENT &&
+        snapshots.isNotEmpty()
+    ) {
+        snapshots
+            .sortedBy(AccountValuationSnapshot::capturedAtEpochMs)
+            .map { snapshot ->
+                val timestamp = snapshot.valuationDate
+                    ?.let(::parseOverviewIsoDateEpochMs)
+                    ?.takeIf { it > 0L }
+                    ?: snapshot.capturedAtEpochMs
+                OverviewHistoryPoint(
+                    timestampEpochMs = timestamp,
+                    valueMinor = snapshot.valueMinor,
+                    axisLabel = formatOverviewAxisLabel(timestamp),
+                    detailLabel = formatOverviewDetailLabel(timestamp),
+                )
+            }
+    } else {
+        buildLocalOverviewPoints(
+            account = account,
+            transactions = transactions,
+        )
+    }
+
+    if (points.isEmpty()) return null
+
+    return OverviewHistoryLine(
+        id = account.id,
+        label = account.name,
+        points = points,
+        isTotal = false,
+    )
+}
+
+private fun buildLocalOverviewPoints(
+    account: Account,
+    transactions: List<FinanceTransaction>,
+): List<OverviewHistoryPoint> {
+    val sortedTransactions = transactions.sortedBy(FinanceTransaction::postedAtEpochMs)
+    val startingPointEpochMs = sortedTransactions.firstOrNull()?.postedAtEpochMs ?: account.createdAtEpochMs
+    var runningBalanceMinor = account.openingBalanceMinor
+
+    return buildList {
+        add(
+            OverviewHistoryPoint(
+                timestampEpochMs = startingPointEpochMs,
+                valueMinor = runningBalanceMinor,
+                axisLabel = formatOverviewAxisLabel(startingPointEpochMs),
+                detailLabel = formatOverviewDetailLabel(startingPointEpochMs),
+            ),
+        )
+        sortedTransactions.forEach { transaction ->
+            runningBalanceMinor += transaction.overviewBalanceDeltaMinor()
+            add(
+                OverviewHistoryPoint(
+                    timestampEpochMs = transaction.postedAtEpochMs,
+                    valueMinor = runningBalanceMinor,
+                    axisLabel = formatOverviewAxisLabel(transaction.postedAtEpochMs),
+                    detailLabel = formatOverviewDetailLabel(transaction.postedAtEpochMs),
+                ),
+            )
+        }
+    }
+}
+
+private fun FinanceTransaction.overviewBalanceDeltaMinor(): Long = when (type) {
+    TransactionType.INCOME -> amountMinor
+    TransactionType.EXPENSE -> -amountMinor
+    TransactionType.TRANSFER -> 0L
+    TransactionType.ADJUSTMENT -> amountMinor
+}
+
+private fun filterOverviewHistoryPoints(
+    points: List<OverviewHistoryPoint>,
+    period: OverviewPeriodFilter,
+    customStartEpochMs: Long?,
+    customEndEpochMs: Long?,
+    nowEpochMs: Long,
+): List<OverviewHistoryPoint> {
+    if (points.isEmpty()) return emptyList()
+    if (period == OverviewPeriodFilter.ALL) return points
+
+    val (startEpochMs, endEpochMs) = resolveOverviewRange(
+        period = period,
+        customStartEpochMs = customStartEpochMs,
+        customEndEpochMs = customEndEpochMs,
+        nowEpochMs = nowEpochMs,
+    ) ?: return points
+
+    val carryForward = points
+        .lastOrNull { point -> point.timestampEpochMs < startEpochMs }
+        ?.copy(
+            timestampEpochMs = startEpochMs,
+            axisLabel = formatOverviewAxisLabel(startEpochMs),
+            detailLabel = formatOverviewDetailLabel(startEpochMs),
+        )
+
+    val inRange = points.filter { point ->
+        point.timestampEpochMs in startEpochMs..endEpochMs
+    }
+
+    return buildList {
+        carryForward?.let(::add)
+        addAll(inRange)
+        if (isEmpty()) {
+            points.lastOrNull()?.let { lastPoint ->
+                add(
+                    lastPoint.copy(
+                        timestampEpochMs = endEpochMs,
+                        axisLabel = formatOverviewAxisLabel(endEpochMs),
+                        detailLabel = formatOverviewDetailLabel(endEpochMs),
+                    ),
+                )
+            }
+        }
+    }.distinctBy { point -> point.timestampEpochMs to point.valueMinor }
+}
+
+private fun resolveOverviewRange(
+    period: OverviewPeriodFilter,
+    customStartEpochMs: Long?,
+    customEndEpochMs: Long?,
+    nowEpochMs: Long,
+): Pair<Long, Long>? {
+    if (period == OverviewPeriodFilter.ALL) return null
+    if (period == OverviewPeriodFilter.CUSTOM) {
+        val start = customStartEpochMs ?: return null
+        val end = customEndEpochMs ?: return null
+        return start to end
+    }
+
+    val timeZone = TimeZone.currentSystemDefault()
+    val currentDate = Instant
+        .fromEpochMilliseconds(nowEpochMs)
+        .toLocalDateTime(timeZone)
+        .date
+    val startEpochMs = currentDate
+        .minus(period.toDatePeriod())
+        .atStartOfDayIn(timeZone)
+        .toEpochMilliseconds()
+
+    return startEpochMs to nowEpochMs
+}
+
+private fun buildTotalOverviewLine(
+    series: List<OverviewHistoryLine>,
+): OverviewHistoryLine? {
+    val timestamps = series
+        .flatMap { line -> line.points.map(OverviewHistoryPoint::timestampEpochMs) }
+        .distinct()
+        .sorted()
+
+    if (timestamps.isEmpty()) return null
+
+    val totalPoints = timestamps.map { timestamp ->
+        val totalValue = series.sumOf { line ->
+            line.points
+                .lastOrNull { point -> point.timestampEpochMs <= timestamp }
+                ?.valueMinor
+                ?: 0L
+        }
+        OverviewHistoryPoint(
+            timestampEpochMs = timestamp,
+            valueMinor = totalValue,
+            axisLabel = formatOverviewAxisLabel(timestamp),
+            detailLabel = formatOverviewDetailLabel(timestamp),
+        )
+    }
+
+    return OverviewHistoryLine(
+        id = "total",
+        label = "Total",
+        points = totalPoints,
+        isTotal = true,
+    )
+}
 
 internal fun calculateOverviewCashFlow(
     transactions: List<FinanceTransaction>,
@@ -207,3 +455,29 @@ private fun formatDateLabel(epochMs: Long): String {
 
     return "$month ${target.day}"
 }
+
+private fun formatOverviewAxisLabel(epochMs: Long): String {
+    val date = Instant.fromEpochMilliseconds(epochMs)
+        .toLocalDateTime(TimeZone.currentSystemDefault())
+        .date
+    return "${shortMonthLabel(date)} ${date.day}"
+}
+
+private fun formatOverviewDetailLabel(epochMs: Long): String {
+    val date = Instant.fromEpochMilliseconds(epochMs)
+        .toLocalDateTime(TimeZone.currentSystemDefault())
+        .date
+    return "${shortMonthLabel(date)} ${date.day}, ${date.year}"
+}
+
+private fun parseOverviewIsoDateEpochMs(rawValue: String): Long = runCatching {
+    val localDate = runCatching { LocalDate.parse(rawValue) }
+        .getOrElse { LocalDate.parse(rawValue.substringBefore('T')) }
+    localDate.atStartOfDayIn(TimeZone.currentSystemDefault()).toEpochMilliseconds()
+}.getOrDefault(0L)
+
+private fun shortMonthLabel(date: LocalDate): String =
+    date.month.name
+        .lowercase()
+        .replaceFirstChar { character -> character.uppercase() }
+        .take(3)

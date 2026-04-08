@@ -6,6 +6,7 @@ data class OverviewSnapshot(
     val expenses: String,
     val savingsRate: String,
     val focusMessage: String,
+    val history: OverviewHistory?,
     val recentTransactions: List<RecentTransaction>,
 )
 
@@ -24,4 +25,27 @@ data class RecentTransaction(
     val amountLabel: String,
     val dateLabel: String,
     val isExpense: Boolean,
+)
+
+data class OverviewHistory(
+    val currencyCode: String,
+    val lines: List<OverviewHistoryLine>,
+    val minimumLabel: String,
+    val maximumLabel: String,
+    val startLabel: String,
+    val endLabel: String,
+)
+
+data class OverviewHistoryLine(
+    val id: String,
+    val label: String,
+    val points: List<OverviewHistoryPoint>,
+    val isTotal: Boolean,
+)
+
+data class OverviewHistoryPoint(
+    val timestampEpochMs: Long,
+    val valueMinor: Long,
+    val axisLabel: String,
+    val detailLabel: String,
 )

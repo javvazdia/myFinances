@@ -1,5 +1,9 @@
 package com.myfinances.app.data
 
+import com.myfinances.app.domain.model.Account
+import com.myfinances.app.domain.model.AccountSourceType
+import com.myfinances.app.domain.model.AccountType
+import com.myfinances.app.domain.model.AccountValuationSnapshot
 import com.myfinances.app.domain.model.FinanceTransaction
 import com.myfinances.app.domain.model.OverviewPeriodFilter
 import com.myfinances.app.domain.model.TransactionType
@@ -94,6 +98,82 @@ class DefaultFinanceRepositoryTest {
         assertEquals(1_000_00L, cashFlow.incomeMinor)
         assertEquals(0L, cashFlow.expenseMinor)
     }
+
+    @Test
+    fun buildsOverviewHistoryWithTotalAndPerAccountLines() {
+        val history = buildOverviewHistory(
+            accounts = listOf(
+                account(id = "acc-1", name = "Checking", sourceType = AccountSourceType.MANUAL),
+                account(id = "acc-2", name = "Broker", sourceType = AccountSourceType.API_SYNC, type = AccountType.INVESTMENT),
+            ),
+            allTransactions = listOf(
+                transaction(
+                    id = "txn-1",
+                    type = TransactionType.INCOME,
+                    amountMinor = 100_00L,
+                    postedAtEpochMs = epochMsOf(2026, 1, 10),
+                ).copy(accountId = "acc-1"),
+            ),
+            allSnapshots = listOf(
+                snapshot(
+                    id = "snap-1",
+                    accountId = "acc-2",
+                    valueMinor = 1_000_00L,
+                    valuationDate = "2026-01-10",
+                ),
+                snapshot(
+                    id = "snap-2",
+                    accountId = "acc-2",
+                    valueMinor = 1_050_00L,
+                    valuationDate = "2026-02-10",
+                ),
+            ),
+            period = OverviewPeriodFilter.ALL,
+            nowEpochMs = epochMsOf(2026, 2, 15),
+        )
+
+        assertEquals(3, history?.lines?.size)
+        assertEquals("Total", history?.lines?.first()?.label)
+        assertEquals("Checking", history?.lines?.get(1)?.label)
+        assertEquals("Broker", history?.lines?.get(2)?.label)
+        assertEquals(1_100_00L, history?.lines?.first()?.points?.first()?.valueMinor)
+        assertEquals(1_150_00L, history?.lines?.first()?.points?.last()?.valueMinor)
+    }
+
+    @Test
+    fun customOverviewHistoryRangeCarriesForwardStartingBalance() {
+        val history = buildOverviewHistory(
+            accounts = listOf(
+                account(id = "acc-1", name = "Checking", sourceType = AccountSourceType.MANUAL),
+            ),
+            allTransactions = listOf(
+                transaction(
+                    id = "txn-1",
+                    type = TransactionType.INCOME,
+                    amountMinor = 100_00L,
+                    postedAtEpochMs = epochMsOf(2026, 1, 10),
+                ).copy(accountId = "acc-1"),
+                transaction(
+                    id = "txn-2",
+                    type = TransactionType.EXPENSE,
+                    amountMinor = 25_00L,
+                    postedAtEpochMs = epochMsOf(2026, 2, 10),
+                ).copy(accountId = "acc-1"),
+            ),
+            allSnapshots = emptyList(),
+            period = OverviewPeriodFilter.CUSTOM,
+            customStartEpochMs = epochMsOf(2026, 2, 1),
+            customEndEpochMs = epochMsOf(2026, 2, 28),
+            nowEpochMs = epochMsOf(2026, 2, 20),
+        )
+
+        val accountLine = history?.lines?.firstOrNull { line -> !line.isTotal }
+
+        assertEquals(2, accountLine?.points?.size)
+        assertEquals(100_00L, accountLine?.points?.first()?.valueMinor)
+        assertEquals(epochMsOf(2026, 2, 1), accountLine?.points?.first()?.timestampEpochMs)
+        assertEquals(75_00L, accountLine?.points?.last()?.valueMinor)
+    }
 }
 
 private fun transaction(
@@ -115,6 +195,45 @@ private fun transaction(
     postedAtEpochMs = postedAtEpochMs,
     createdAtEpochMs = postedAtEpochMs,
     updatedAtEpochMs = postedAtEpochMs,
+)
+
+private fun account(
+    id: String,
+    name: String,
+    sourceType: AccountSourceType,
+    type: AccountType = AccountType.CHECKING,
+): Account = Account(
+    id = id,
+    name = name,
+    type = type,
+    currencyCode = "EUR",
+    openingBalanceMinor = 0L,
+    sourceType = sourceType,
+    sourceProvider = if (sourceType == AccountSourceType.API_SYNC) "Indexa Capital" else null,
+    externalAccountId = null,
+    lastSyncedAtEpochMs = null,
+    isArchived = false,
+    createdAtEpochMs = epochMsOf(2026, 1, 1),
+    updatedAtEpochMs = epochMsOf(2026, 1, 1),
+)
+
+private fun snapshot(
+    id: String,
+    accountId: String,
+    valueMinor: Long,
+    valuationDate: String,
+): AccountValuationSnapshot = AccountValuationSnapshot(
+    id = id,
+    accountId = accountId,
+    sourceProvider = "Indexa Capital",
+    currencyCode = "EUR",
+    valueMinor = valueMinor,
+    valuationDate = valuationDate,
+    capturedAtEpochMs = epochMsOf(
+        valuationDate.substring(0, 4).toInt(),
+        valuationDate.substring(5, 7).toInt(),
+        valuationDate.substring(8, 10).toInt(),
+    ),
 )
 
 private fun epochMsOf(year: Int, month: Int, day: Int): Long =

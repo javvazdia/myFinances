@@ -1,6 +1,7 @@
 package com.myfinances.app.presentation.overview
 
 import com.myfinances.app.domain.model.OverviewPeriodFilter
+import com.myfinances.app.domain.model.OverviewHistory
 import com.myfinances.app.domain.model.RecentTransaction
 
 data class OverviewUiState(
@@ -12,5 +13,6 @@ data class OverviewUiState(
     val customStartEpochMs: Long? = null,
     val customEndEpochMs: Long? = null,
     val focusMessage: String = "",
+    val history: OverviewHistory? = null,
     val recentTransactions: List<RecentTransaction> = emptyList(),
 )

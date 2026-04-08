@@ -151,6 +151,7 @@ private class FakeLedgerRepository : LedgerRepository {
     private val accounts = MutableStateFlow<List<Account>>(emptyList())
     private val positionsByAccount = mutableMapOf<String, MutableStateFlow<List<InvestmentPosition>>>()
     private val snapshotsByAccount = mutableMapOf<String, MutableStateFlow<List<AccountValuationSnapshot>>>()
+    private val allSnapshots = MutableStateFlow<List<AccountValuationSnapshot>>(emptyList())
     private val categories = MutableStateFlow<List<Category>>(emptyList())
     private val transactions = MutableStateFlow<List<FinanceTransaction>>(emptyList())
 
@@ -161,6 +162,8 @@ private class FakeLedgerRepository : LedgerRepository {
 
     override fun observeAccountValuationSnapshots(accountId: String): Flow<List<AccountValuationSnapshot>> =
         snapshotsByAccount.getOrPut(accountId) { MutableStateFlow(emptyList()) }
+
+    override fun observeAllAccountValuationSnapshots(): Flow<List<AccountValuationSnapshot>> = allSnapshots
 
     override fun observeCategories(): Flow<List<Category>> = categories
 
@@ -208,6 +211,9 @@ private class FakeLedgerRepository : LedgerRepository {
                 .filterNot { existing -> existing.id == snapshot.id }
                 .plus(snapshot)
                 .sortedBy(AccountValuationSnapshot::capturedAtEpochMs)
+        allSnapshots.value = snapshotsByAccount.values
+            .flatMap { snapshots -> snapshots.value }
+            .sortedBy(AccountValuationSnapshot::capturedAtEpochMs)
     }
 
     override suspend fun deleteAccount(accountId: String) = Unit

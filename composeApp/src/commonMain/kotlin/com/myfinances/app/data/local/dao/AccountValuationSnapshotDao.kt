@@ -11,6 +11,14 @@ interface AccountValuationSnapshotDao {
     @Query(
         """
         SELECT * FROM account_valuation_snapshots
+        ORDER BY captured_at_epoch_ms ASC
+        """,
+    )
+    fun observeAllSnapshots(): Flow<List<AccountValuationSnapshotEntity>>
+
+    @Query(
+        """
+        SELECT * FROM account_valuation_snapshots
         WHERE account_id = :accountId
         ORDER BY captured_at_epoch_ms ASC
         """,

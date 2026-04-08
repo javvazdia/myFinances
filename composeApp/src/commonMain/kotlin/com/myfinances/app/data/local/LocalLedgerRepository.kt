@@ -34,6 +34,11 @@ class LocalLedgerRepository(
             .observeSnapshotsForAccount(accountId)
             .map { snapshots -> snapshots.map(AccountValuationSnapshotEntityMapper::toDomain) }
 
+    override fun observeAllAccountValuationSnapshots(): Flow<List<AccountValuationSnapshot>> =
+        database.accountValuationSnapshotDao()
+            .observeAllSnapshots()
+            .map { snapshots -> snapshots.map(AccountValuationSnapshotEntityMapper::toDomain) }
+
     override fun observeCategories(): Flow<List<Category>> =
         database.categoryDao()
             .observeActiveCategories()

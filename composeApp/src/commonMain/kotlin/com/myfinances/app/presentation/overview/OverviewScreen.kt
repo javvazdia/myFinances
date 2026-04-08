@@ -91,6 +91,10 @@ fun OverviewScreen(
         }
 
         item {
+            OverviewHistoryCard(history = uiState.history)
+        }
+
+        item {
             Column(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(12.dp),

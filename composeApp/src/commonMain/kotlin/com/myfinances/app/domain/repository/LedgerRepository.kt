@@ -15,6 +15,8 @@ interface LedgerRepository {
 
     fun observeAccountValuationSnapshots(accountId: String): Flow<List<AccountValuationSnapshot>>
 
+    fun observeAllAccountValuationSnapshots(): Flow<List<AccountValuationSnapshot>>
+
     fun observeCategories(): Flow<List<Category>>
 
     fun observeCategories(kind: CategoryKind): Flow<List<Category>>
