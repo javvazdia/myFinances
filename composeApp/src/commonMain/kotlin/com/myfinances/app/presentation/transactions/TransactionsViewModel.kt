@@ -4,14 +4,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.myfinances.app.domain.model.Account
 import com.myfinances.app.domain.model.Category
-import com.myfinances.app.domain.model.CategoryKind
 import com.myfinances.app.domain.model.FinanceTransaction
 import com.myfinances.app.domain.model.TransactionType
 import com.myfinances.app.domain.repository.LedgerRepository
-import com.myfinances.app.integrations.statements.StatementImportResult
 import com.myfinances.app.integrations.statements.StatementImportService
-import com.myfinances.app.presentation.shared.formatDayLabel
-import com.myfinances.app.presentation.shared.formatMinorMoney
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -20,81 +16,9 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlin.random.Random
 import kotlin.time.Clock
 
-internal const val INITIAL_TRANSACTION_PAGE_SIZE = 30
 private const val TRANSACTION_PAGE_SIZE_STEP = 30
-
-data class TransactionsUiState(
-    val accounts: List<Account> = emptyList(),
-    val categories: List<Category> = emptyList(),
-    val transactions: List<FinanceTransaction> = emptyList(),
-    val recentTransactions: List<TransactionCardUiModel> = emptyList(),
-    val transactionLimit: Int = INITIAL_TRANSACTION_PAGE_SIZE,
-    val canLoadMoreTransactions: Boolean = false,
-    val isLoadingMoreTransactions: Boolean = false,
-    val isStatementImportSupported: Boolean = false,
-    val isImportingStatement: Boolean = false,
-    val importMessage: String? = null,
-    val isFormVisible: Boolean = false,
-    val selectedType: TransactionType = TransactionType.EXPENSE,
-    val selectedAccountId: String? = null,
-    val selectedCategoryId: String? = null,
-    val draftAmount: String = "",
-    val draftMerchant: String = "",
-    val draftNote: String = "",
-    val editingTransactionId: String? = null,
-    val selectedTransactionDetailId: String? = null,
-    val deleteConfirmationTransactionId: String? = null,
-    val isSaving: Boolean = false,
-    val pendingDeleteTransactionId: String? = null,
-    val errorMessage: String? = null,
-) {
-    val availableCategories: List<Category>
-        get() = categories.filter { category -> category.kind == selectedType.categoryKind }
-
-    val selectedAccountName: String?
-        get() = accounts.firstOrNull { account -> account.id == selectedAccountId }?.name
-
-    val selectedCategoryName: String?
-        get() = categories.firstOrNull { category -> category.id == selectedCategoryId }?.name
-
-    val isEditing: Boolean
-        get() = editingTransactionId != null
-
-    val deleteConfirmationTransactionTitle: String?
-        get() = recentTransactions.firstOrNull { transaction ->
-            transaction.id == deleteConfirmationTransactionId
-        }?.title
-
-    val selectedTransactionDetail: TransactionCardUiModel?
-        get() = recentTransactions.firstOrNull { transaction ->
-            transaction.id == selectedTransactionDetailId
-        }
-
-    val isBusy: Boolean
-        get() = isSaving || pendingDeleteTransactionId != null || isImportingStatement
-}
-
-data class TransactionCardUiModel(
-    val id: String,
-    val title: String,
-    val accountName: String,
-    val categoryName: String,
-    val amountLabel: String,
-    val dateLabel: String,
-    val sourceLabel: String?,
-    val metadataPreview: String?,
-    val detailRows: List<TransactionDetailRowUiModel>,
-    val isProviderManaged: Boolean,
-    val isExpense: Boolean,
-)
-
-data class TransactionDetailRowUiModel(
-    val label: String,
-    val value: String,
-)
 
 private data class TransactionCollectionSnapshot(
     val accounts: List<Account>,
@@ -518,148 +442,3 @@ class TransactionsViewModel(
         }
     }
 }
-
-internal fun FinanceTransaction.toCardUiModel(
-    accounts: List<Account>,
-    categories: List<Category>,
-): TransactionCardUiModel {
-    val accountName = accounts.firstOrNull { account -> account.id == accountId }?.name ?: "Unknown account"
-    val categoryName = categories.firstOrNull { category -> category.id == categoryId }?.name ?: "Uncategorized"
-    val isExpense = type == TransactionType.EXPENSE
-    val isProviderManaged = isProviderManaged()
-
-    return TransactionCardUiModel(
-        id = id,
-        title = merchantName ?: type.label,
-        accountName = accountName,
-        categoryName = categoryName,
-        amountLabel = buildSignedAmountLabel(amountMinor, currencyCode, isExpense),
-        dateLabel = formatTransactionDateLabel(postedAtEpochMs),
-        sourceLabel = buildTransactionSourceLabel(),
-        metadataPreview = buildTransactionMetadataPreview(),
-        detailRows = buildTransactionDetailRows(accountName, categoryName),
-        isProviderManaged = isProviderManaged,
-        isExpense = isExpense,
-    )
-}
-
-private fun FinanceTransaction.buildTransactionMetadataPreview(): String? =
-    note?.takeIf(String::isNotBlank)
-        ?: externalTransactionId?.takeIf(String::isNotBlank)?.let { reference -> "Reference $reference" }
-
-private fun FinanceTransaction.buildTransactionSourceLabel(): String? =
-    sourceProvider?.takeIf(String::isNotBlank)?.let { provider ->
-        if (externalTransactionId.isNullOrBlank()) {
-            "Imported from $provider"
-        } else {
-            "Synced from $provider"
-        }
-    }
-
-private fun FinanceTransaction.buildTransactionDetailRows(
-    accountName: String,
-    categoryName: String,
-): List<TransactionDetailRowUiModel> = buildList {
-    add(TransactionDetailRowUiModel(label = "Account", value = accountName))
-    add(TransactionDetailRowUiModel(label = "Category", value = categoryName))
-    add(TransactionDetailRowUiModel(label = "Type", value = type.label))
-    add(TransactionDetailRowUiModel(label = "Date", value = formatTransactionDateLabel(postedAtEpochMs)))
-    buildTransactionSourceLabel()?.let { sourceLabel ->
-        add(TransactionDetailRowUiModel(label = "Source", value = sourceLabel))
-    }
-    externalTransactionId?.takeIf(String::isNotBlank)?.let { reference ->
-        add(TransactionDetailRowUiModel(label = "Reference", value = reference))
-    }
-    merchantName?.takeIf(String::isNotBlank)?.let { merchant ->
-        add(TransactionDetailRowUiModel(label = "Merchant", value = merchant))
-    }
-    note?.takeIf(String::isNotBlank)?.let { transactionNote ->
-        add(TransactionDetailRowUiModel(label = "Notes", value = transactionNote))
-    }
-}
-
-private fun buildSignedAmountLabel(
-    amountMinor: Long,
-    currencyCode: String,
-    isExpense: Boolean,
-): String {
-    val sign = when {
-        isExpense -> "-"
-        amountMinor < 0L -> "-"
-        else -> "+"
-    }
-    return sign + formatTransactionMoney(kotlin.math.abs(amountMinor), currencyCode)
-}
-
-internal fun FinanceTransaction.isProviderManaged(): Boolean =
-    !sourceProvider.isNullOrBlank() && !externalTransactionId.isNullOrBlank()
-
-internal val manualTransactionTypes: List<TransactionType> = listOf(
-    TransactionType.EXPENSE,
-    TransactionType.INCOME,
-)
-
-internal val TransactionType.label: String
-    get() = name
-        .lowercase()
-        .replaceFirstChar { character -> character.uppercase() }
-
-internal val TransactionType.categoryKind: CategoryKind
-    get() = when (this) {
-        TransactionType.INCOME -> CategoryKind.INCOME
-        TransactionType.EXPENSE -> CategoryKind.EXPENSE
-        TransactionType.TRANSFER -> CategoryKind.TRANSFER
-        TransactionType.ADJUSTMENT -> CategoryKind.EXPENSE
-    }
-
-internal fun parseTransactionAmountToMinor(rawValue: String): Long? {
-    val normalized = rawValue.trim().replace(',', '.')
-    if (normalized.isBlank()) return null
-
-    val amountPattern = Regex("^\\d+(\\.\\d{0,2})?$")
-    if (!amountPattern.matches(normalized)) return null
-
-    val parts = normalized.split('.')
-    val wholePart = parts.firstOrNull()?.toLongOrNull() ?: return null
-    val decimalPart = parts.getOrNull(1)?.padEnd(2, '0') ?: "00"
-    return (wholePart * 100) + decimalPart.toLong()
-}
-
-internal fun generateTransactionId(type: TransactionType, timestampMs: Long): String =
-    "txn-${type.name.lowercase()}-$timestampMs-${Random.nextInt(1000, 9999)}"
-
-internal fun formatTransactionAmountInput(amountMinor: Long): String {
-    val absoluteAmount = kotlin.math.abs(amountMinor)
-    val major = absoluteAmount / 100
-    val minor = absoluteAmount % 100
-    return "$major.${minor.toString().padStart(2, '0')}"
-}
-
-internal fun formatTransactionMoney(amountMinor: Long, currencyCode: String): String =
-    formatMinorMoney(amountMinor, currencyCode)
-
-internal fun formatTransactionDateLabel(
-    epochMs: Long,
-    nowEpochMs: Long = Clock.System.now().toEpochMilliseconds(),
-): String = formatDayLabel(epochMs, nowEpochMs)
-
-private fun TransactionsUiState.toCreateMode(): TransactionsUiState =
-    copy(
-        draftAmount = "",
-        draftMerchant = "",
-        draftNote = "",
-        isFormVisible = false,
-        editingTransactionId = null,
-        selectedTransactionDetailId = null,
-        deleteConfirmationTransactionId = null,
-        isSaving = false,
-        pendingDeleteTransactionId = null,
-        errorMessage = null,
-    )
-
-private fun buildImportMessage(result: StatementImportResult): String =
-    if (result.skippedTransactions > 0) {
-        "Imported ${result.importedTransactions} transactions from ${result.sourceFileName} into ${result.accountName}. Skipped ${result.skippedTransactions} duplicates. Closing balance ${formatTransactionMoney(result.endingBalanceMinor, result.currencyCode)}."
-    } else {
-        "Imported ${result.importedTransactions} transactions from ${result.sourceFileName} into ${result.accountName}. Closing balance ${formatTransactionMoney(result.endingBalanceMinor, result.currencyCode)}."
-    }
