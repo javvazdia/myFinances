@@ -94,6 +94,7 @@ fun MyFinancesApp(appDependencies: AppDependencies) {
                     ledgerRepository = appDependencies.ledgerRepository,
                     externalConnectionsRepository = appDependencies.externalConnectionsRepository,
                     providerConnectors = appDependencies.providerConnectors,
+                    cajaIngenierosBrowserSyncService = appDependencies.cajaIngenierosBrowserSyncService,
                 )
             }
         }

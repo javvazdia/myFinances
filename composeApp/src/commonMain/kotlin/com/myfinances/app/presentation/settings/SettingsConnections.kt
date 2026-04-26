@@ -47,6 +47,7 @@ internal fun ConnectionsOverviewCard(
     onTestProviderConnection: (ExternalProviderId) -> Unit,
     onConnectProvider: (ExternalProviderId) -> Unit,
     onRunProviderSync: (ExternalProviderId) -> Unit,
+    onRunCajaBrowserSync: () -> Unit,
     onRequestDisconnectConnection: (String) -> Unit,
 ) {
     Card {
@@ -98,6 +99,7 @@ internal fun ConnectionsOverviewCard(
                         onTestConnection = onTestProviderConnection,
                         onConnect = onConnectProvider,
                         onRunSync = onRunProviderSync,
+                        onRunCajaBrowserSync = onRunCajaBrowserSync,
                         onRequestDisconnectConnection = onRequestDisconnectConnection,
                     )
                 }
@@ -119,6 +121,7 @@ private fun ProviderSetupCard(
     onTestConnection: (ExternalProviderId) -> Unit,
     onConnect: (ExternalProviderId) -> Unit,
     onRunSync: (ExternalProviderId) -> Unit,
+    onRunCajaBrowserSync: () -> Unit,
     onRequestDisconnectConnection: (String) -> Unit,
 ) {
     Card(
@@ -176,6 +179,23 @@ private fun ProviderSetupCard(
                     Text(if (providerState.isConnecting) "Connecting..." else "Save connection")
                 }
 
+                if (provider.id == ExternalProviderId.CAJA_INGENIEROS) {
+                    Button(
+                        onClick = onRunCajaBrowserSync,
+                        enabled = !providerState.isTesting &&
+                            !providerState.isConnecting &&
+                            !providerState.isSyncing,
+                    ) {
+                        Text(
+                            if (providerState.isSyncing) {
+                                "Waiting for download..."
+                            } else {
+                                "Sync via browser"
+                            },
+                        )
+                    }
+                }
+
                 if (connection != null) {
                     Button(
                         onClick = { onRunSync(provider.id) },
@@ -217,6 +237,14 @@ private fun ProviderSetupCard(
                     text = error,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.error,
+                )
+            }
+
+            if (provider.id == ExternalProviderId.CAJA_INGENIEROS && connection == null) {
+                Text(
+                    text = "Sync via browser is the desktop fallback when API access is unavailable. It creates a local Caja connection automatically, opens the browser, and imports the first PDF statement you download.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
 

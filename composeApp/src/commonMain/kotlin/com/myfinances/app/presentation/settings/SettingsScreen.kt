@@ -30,6 +30,7 @@ fun SettingsScreen(
     onTestProviderConnection: (ExternalProviderId) -> Unit,
     onConnectProvider: (ExternalProviderId) -> Unit,
     onRunProviderSync: (ExternalProviderId) -> Unit,
+    onRunCajaBrowserSync: () -> Unit,
     onRequestDisconnectConnection: (String) -> Unit,
     onConfirmDisconnectConnection: () -> Unit,
     onDismissDisconnectDialog: () -> Unit,
@@ -80,6 +81,7 @@ fun SettingsScreen(
                 onTestProviderConnection = onTestProviderConnection,
                 onConnectProvider = onConnectProvider,
                 onRunProviderSync = onRunProviderSync,
+                onRunCajaBrowserSync = onRunCajaBrowserSync,
                 onRequestDisconnectConnection = onRequestDisconnectConnection,
             )
         }

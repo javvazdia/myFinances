@@ -7,12 +7,15 @@ import com.myfinances.app.domain.model.CategoryKind
 import com.myfinances.app.domain.model.integration.ExternalAccountLink
 import com.myfinances.app.domain.model.integration.ExternalConnection
 import com.myfinances.app.domain.model.integration.ExternalConnectionPreview
+import com.myfinances.app.domain.model.integration.ExternalConnectionStatus
 import com.myfinances.app.domain.model.integration.ExternalProviderCatalog
 import com.myfinances.app.domain.model.integration.ExternalProviderId
 import com.myfinances.app.domain.model.integration.ExternalSyncRun
+import com.myfinances.app.domain.model.integration.ExternalSyncStatus
 import com.myfinances.app.domain.repository.ExternalConnectionsRepository
 import com.myfinances.app.domain.repository.LedgerRepository
 import com.myfinances.app.integrations.ExternalProviderConnector
+import com.myfinances.app.integrations.cajaingenieros.sync.CajaIngenierosBrowserSyncService
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -20,6 +23,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlin.random.Random
@@ -90,6 +94,7 @@ class SettingsViewModel(
     private val ledgerRepository: LedgerRepository,
     private val externalConnectionsRepository: ExternalConnectionsRepository,
     private val providerConnectors: Map<ExternalProviderId, ExternalProviderConnector>,
+    private val cajaIngenierosBrowserSyncService: CajaIngenierosBrowserSyncService,
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(SettingsUiState())
     val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()
@@ -372,6 +377,89 @@ class SettingsViewModel(
                 }
             }
         }
+    }
+
+    fun runCajaIngenierosBrowserSync() {
+        val providerId = ExternalProviderId.CAJA_INGENIEROS
+        if (!cajaIngenierosBrowserSyncService.isSupported) {
+            setProviderError(providerId, "Browser-assisted Caja Ingenieros sync is only available on desktop right now.")
+            return
+        }
+
+        viewModelScope.launch {
+            val connectionId = ensureCajaIngenierosBrowserConnection()
+
+            _uiState.update { currentState ->
+                currentState.copy(
+                    selectedConnectionId = connectionId,
+                    providerStates = currentState.providerStates.updated(providerId) { providerState ->
+                        providerState.copy(
+                            isSyncing = true,
+                            message = "Browser sync started. myFinances opened your default browser. Log in to Caja Ingenieros, navigate to your statement or movements page, and download a PDF into your normal Downloads folder. myFinances will import the first new PDF automatically.",
+                            error = null,
+                        )
+                    },
+                )
+            }
+
+            runCatching {
+                cajaIngenierosBrowserSyncService.runAssistedStatementSync(connectionId)
+            }.onSuccess { syncRun ->
+                _uiState.update { currentState ->
+                    currentState.copy(
+                        providerStates = currentState.providerStates.updated(providerId) { providerState ->
+                            providerState.copy(
+                                isSyncing = false,
+                                message = syncRun?.message
+                                    ?: "Browser sync was canceled before a Caja Ingenieros PDF statement was downloaded.",
+                                error = null,
+                            )
+                        },
+                    )
+                }
+            }.onFailure { throwable ->
+                _uiState.update { currentState ->
+                    currentState.copy(
+                        providerStates = currentState.providerStates.updated(providerId) { providerState ->
+                            providerState.copy(
+                                isSyncing = false,
+                                message = null,
+                                error = throwable.message ?: "Caja Ingenieros browser-assisted sync failed.",
+                            )
+                        },
+                    )
+                }
+            }
+        }
+    }
+
+    private suspend fun ensureCajaIngenierosBrowserConnection(): String {
+        val existingConnection = externalConnectionsRepository
+            .observeConnections()
+            .first()
+            .firstOrNull { connection ->
+                connection.providerId == ExternalProviderId.CAJA_INGENIEROS
+            }
+        if (existingConnection != null) {
+            return existingConnection.id
+        }
+
+        val now = Clock.System.now().toEpochMilliseconds()
+        val connection = ExternalConnection(
+            id = "conn-caja-browser-$now-${Random.nextInt(1000, 9999)}",
+            providerId = ExternalProviderId.CAJA_INGENIEROS,
+            displayName = "Caja Ingenieros (Browser sync)",
+            status = ExternalConnectionStatus.CONNECTED,
+            externalUserId = null,
+            lastSuccessfulSyncEpochMs = null,
+            lastSyncAttemptEpochMs = null,
+            lastSyncStatus = ExternalSyncStatus.IDLE,
+            lastErrorMessage = null,
+            createdAtEpochMs = now,
+            updatedAtEpochMs = now,
+        )
+        externalConnectionsRepository.upsertConnection(connection)
+        return connection.id
     }
 
     fun requestDisconnectConnection(connectionId: String) {

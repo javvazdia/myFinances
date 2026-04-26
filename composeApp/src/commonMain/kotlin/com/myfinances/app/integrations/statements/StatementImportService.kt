@@ -4,6 +4,8 @@ interface StatementImportService {
     val isSupported: Boolean
 
     suspend fun importCajaIngenierosPdf(): StatementImportResult?
+
+    suspend fun importCajaIngenierosPdfFromFile(filePath: String): StatementImportResult
 }
 
 data class StatementImportResult(
@@ -19,5 +21,8 @@ object UnsupportedStatementImportService : StatementImportService {
     override val isSupported: Boolean = false
 
     override suspend fun importCajaIngenierosPdf(): StatementImportResult? =
+        error("PDF statement import is not available on this platform yet.")
+
+    override suspend fun importCajaIngenierosPdfFromFile(filePath: String): StatementImportResult =
         error("PDF statement import is not available on this platform yet.")
 }

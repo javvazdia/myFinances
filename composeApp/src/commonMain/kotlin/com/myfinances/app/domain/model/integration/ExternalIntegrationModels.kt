@@ -156,7 +156,7 @@ object ExternalProviderCatalog {
         ExternalProviderDefinition(
             id = ExternalProviderId.CAJA_INGENIEROS,
             displayName = "Caja Ingenieros",
-            summary = "PSD2-style banking sync for accounts, balances, and transactions.",
+            summary = "PSD2-style banking sync for accounts, balances, transactions, and browser-assisted statement import.",
             capabilities = setOf(
                 ExternalProviderCapability.ACCOUNT_DISCOVERY,
                 ExternalProviderCapability.CASH_TRANSACTIONS_SYNC,
@@ -169,6 +169,7 @@ object ExternalProviderCatalog {
                 "Create or open your app in Caja Ingenieros API Market and copy the OAuth credentials for Sandbox or Production.",
                 "Save those credentials in myFinances to prepare the local connection profile.",
                 "Complete the Caja OAuth and consent flow externally once we wire the live token exchange and account discovery endpoints.",
+                "Or use Sync via browser on desktop to log in manually, download a PDF statement, and let myFinances import it automatically.",
             ),
             documentationLabel = "Caja Ingenieros API Market",
             documentationUrl = "https://apimarket.caixaenginyers.com/",

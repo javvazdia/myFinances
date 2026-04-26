@@ -32,8 +32,13 @@ class DesktopStatementImportService(
 
     override suspend fun importCajaIngenierosPdf(): StatementImportResult? {
         val selectedFile = withContext(Dispatchers.Swing) { choosePdfFile() } ?: return null
-        val statement = withContext(Dispatchers.IO) { extractAndParseStatement(selectedFile) }
-        return withContext(Dispatchers.IO) { importStatement(selectedFile, statement) }
+        return importCajaIngenierosPdfFromFile(selectedFile.absolutePath)
+    }
+
+    override suspend fun importCajaIngenierosPdfFromFile(filePath: String): StatementImportResult {
+        val file = File(filePath)
+        val statement = withContext(Dispatchers.IO) { extractAndParseStatement(file) }
+        return withContext(Dispatchers.IO) { importStatement(file, statement) }
     }
 
     private suspend fun importStatement(
