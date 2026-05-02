@@ -4,6 +4,7 @@ import com.myfinances.app.data.integration.DesktopConnectionSecretStore
 import com.myfinances.app.data.local.db.createMyFinancesDatabase
 import com.myfinances.app.integrations.cajaingenieros.sync.DesktopCajaIngenierosBrowserSyncService
 import com.myfinances.app.integrations.statements.DesktopStatementImportService
+import com.myfinances.app.platform.DesktopDirectoryPickerService
 
 fun createAppDependencies(): AppDependencies =
     buildAppDependencies(
@@ -11,4 +12,5 @@ fun createAppDependencies(): AppDependencies =
         connectionSecretStore = DesktopConnectionSecretStore(),
         statementImportServiceFactory = ::DesktopStatementImportService,
         cajaIngenierosBrowserSyncServiceFactory = ::DesktopCajaIngenierosBrowserSyncService,
+        directoryPickerService = DesktopDirectoryPickerService(),
     )

@@ -9,6 +9,7 @@ import com.myfinances.app.domain.repository.ExternalConnectionsRepository
 import com.myfinances.app.domain.repository.LedgerRepository
 import com.myfinances.app.integrations.ExternalProviderConnector
 import com.myfinances.app.integrations.cajaingenieros.sync.CajaIngenierosBrowserSyncService
+import com.myfinances.app.platform.DirectoryPickerService
 
 @Composable
 fun SettingsRoute(
@@ -16,24 +17,28 @@ fun SettingsRoute(
     externalConnectionsRepository: ExternalConnectionsRepository,
     providerConnectors: Map<ExternalProviderId, ExternalProviderConnector>,
     cajaIngenierosBrowserSyncService: CajaIngenierosBrowserSyncService,
+    directoryPickerService: DirectoryPickerService,
     settingsViewModel: SettingsViewModel = viewModel {
         SettingsViewModel(
             ledgerRepository = ledgerRepository,
             externalConnectionsRepository = externalConnectionsRepository,
             providerConnectors = providerConnectors,
             cajaIngenierosBrowserSyncService = cajaIngenierosBrowserSyncService,
+            directoryPickerService = directoryPickerService,
         )
     },
 ) {
     val uiState by settingsViewModel.uiState.collectAsState()
     SettingsScreen(
         uiState = uiState,
+        canPickCajaBrowserDownloadsDirectory = directoryPickerService.isSupported,
         onSelectConnection = settingsViewModel::selectConnection,
         onProviderFieldChange = settingsViewModel::onProviderFieldChange,
         onTestProviderConnection = settingsViewModel::testProviderConnection,
         onConnectProvider = settingsViewModel::connectProvider,
         onRunProviderSync = settingsViewModel::runProviderSync,
         onRunCajaBrowserSync = settingsViewModel::runCajaIngenierosBrowserSync,
+        onPickCajaBrowserDownloadsDirectory = settingsViewModel::pickCajaBrowserDownloadsDirectory,
         onRequestDisconnectConnection = settingsViewModel::requestDisconnectConnection,
         onConfirmDisconnectConnection = settingsViewModel::confirmDisconnectConnection,
         onDismissDisconnectDialog = settingsViewModel::dismissDisconnectDialog,

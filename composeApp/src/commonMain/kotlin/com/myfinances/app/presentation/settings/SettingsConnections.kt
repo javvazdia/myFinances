@@ -42,12 +42,14 @@ import com.myfinances.app.presentation.shared.formatTimestampLabel
 @Composable
 internal fun ConnectionsOverviewCard(
     uiState: SettingsUiState,
+    canPickCajaBrowserDownloadsDirectory: Boolean,
     onSelectConnection: (String) -> Unit,
     onProviderFieldChange: (ExternalProviderId, String, String) -> Unit,
     onTestProviderConnection: (ExternalProviderId) -> Unit,
     onConnectProvider: (ExternalProviderId) -> Unit,
     onRunProviderSync: (ExternalProviderId) -> Unit,
     onRunCajaBrowserSync: () -> Unit,
+    onPickCajaBrowserDownloadsDirectory: () -> Unit,
     onRequestDisconnectConnection: (String) -> Unit,
 ) {
     Card {
@@ -88,6 +90,7 @@ internal fun ConnectionsOverviewCard(
                         providerState = providerState,
                         connection = connection,
                         isSelectedConnection = uiState.selectedConnection?.id == connection?.id,
+                        canPickCajaBrowserDownloadsDirectory = canPickCajaBrowserDownloadsDirectory,
                         accountLinks = connection
                             ?.let { activeConnection -> uiState.accountLinksByConnection[activeConnection.id].orEmpty() }
                             .orEmpty(),
@@ -100,6 +103,7 @@ internal fun ConnectionsOverviewCard(
                         onConnect = onConnectProvider,
                         onRunSync = onRunProviderSync,
                         onRunCajaBrowserSync = onRunCajaBrowserSync,
+                        onPickCajaBrowserDownloadsDirectory = onPickCajaBrowserDownloadsDirectory,
                         onRequestDisconnectConnection = onRequestDisconnectConnection,
                     )
                 }
@@ -114,6 +118,7 @@ private fun ProviderSetupCard(
     providerState: ProviderConnectionUiState,
     connection: ExternalConnection?,
     isSelectedConnection: Boolean,
+    canPickCajaBrowserDownloadsDirectory: Boolean,
     accountLinks: List<ExternalAccountLink>,
     syncRuns: List<ExternalSyncRun>,
     pendingDisconnectConnectionId: String?,
@@ -122,6 +127,7 @@ private fun ProviderSetupCard(
     onConnect: (ExternalProviderId) -> Unit,
     onRunSync: (ExternalProviderId) -> Unit,
     onRunCajaBrowserSync: () -> Unit,
+    onPickCajaBrowserDownloadsDirectory: () -> Unit,
     onRequestDisconnectConnection: (String) -> Unit,
 ) {
     Card(
@@ -159,6 +165,32 @@ private fun ProviderSetupCard(
                     enabled = !providerState.isTesting && !providerState.isConnecting && !providerState.isSyncing,
                     onFieldChange = onFieldChange,
                 )
+            }
+
+            if (provider.id == ExternalProviderId.CAJA_INGENIEROS) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = providerState.fieldValue(CAJA_BROWSER_DOWNLOADS_DIR_FIELD),
+                        onValueChange = { nextValue ->
+                            onFieldChange(provider.id, CAJA_BROWSER_DOWNLOADS_DIR_FIELD, nextValue)
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Browser sync downloads folder") },
+                        supportingText = {
+                            Text("Optional. Leave blank to watch your default Downloads folder. Use this if your browser saves statements somewhere else.")
+                        },
+                        singleLine = true,
+                        enabled = !providerState.isTesting && !providerState.isConnecting && !providerState.isSyncing,
+                    )
+                    if (canPickCajaBrowserDownloadsDirectory) {
+                        Button(
+                            onClick = onPickCajaBrowserDownloadsDirectory,
+                            enabled = !providerState.isTesting && !providerState.isConnecting && !providerState.isSyncing,
+                        ) {
+                            Text("Choose folder")
+                        }
+                    }
+                }
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -242,7 +274,7 @@ private fun ProviderSetupCard(
 
             if (provider.id == ExternalProviderId.CAJA_INGENIEROS && connection == null) {
                 Text(
-                    text = "Sync via browser is the desktop fallback when API access is unavailable. It creates a local Caja connection automatically, opens the browser, and imports the first PDF statement you download.",
+                    text = "Sync via browser is the desktop fallback when API access is unavailable. It creates a local Caja connection automatically, opens your default browser, and imports the first new PDF statement downloaded into ${browserSyncFolderLabel(providerState.fieldValue(CAJA_BROWSER_DOWNLOADS_DIR_FIELD).ifBlank { null })}.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

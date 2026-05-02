@@ -22,6 +22,8 @@ import com.myfinances.app.integrations.indexa.api.KtorIndexaApiClient
 import com.myfinances.app.integrations.indexa.sync.IndexaIntegrationService
 import com.myfinances.app.integrations.indexa.sync.StubIndexaIntegrationService
 import com.myfinances.app.domain.model.integration.ExternalProviderId
+import com.myfinances.app.platform.DirectoryPickerService
+import com.myfinances.app.platform.UnsupportedDirectoryPickerService
 
 data class AppDependencies(
     val financeRepository: FinanceRepository,
@@ -31,6 +33,7 @@ data class AppDependencies(
     val indexaIntegrationService: IndexaIntegrationService,
     val cajaIngenierosIntegrationService: CajaIngenierosIntegrationService,
     val cajaIngenierosBrowserSyncService: CajaIngenierosBrowserSyncService,
+    val directoryPickerService: DirectoryPickerService,
     val statementImportService: StatementImportService,
     val seedStarterData: suspend () -> Unit,
 )
@@ -43,6 +46,7 @@ fun buildAppDependencies(
         ExternalConnectionsRepository,
         StatementImportService,
     ) -> CajaIngenierosBrowserSyncService = { _, _ -> UnsupportedCajaIngenierosBrowserSyncService },
+    directoryPickerService: DirectoryPickerService = UnsupportedDirectoryPickerService,
 ): AppDependencies {
     val ledgerRepository = LocalLedgerRepository(database)
     val financeRepository = DefaultFinanceRepository(ledgerRepository)
@@ -83,6 +87,7 @@ fun buildAppDependencies(
         indexaIntegrationService = indexaIntegrationService,
         cajaIngenierosIntegrationService = cajaIngenierosIntegrationService,
         cajaIngenierosBrowserSyncService = cajaIngenierosBrowserSyncService,
+        directoryPickerService = directoryPickerService,
         statementImportService = statementImportService,
         seedStarterData = { seeder.seedIfNeeded() },
     )

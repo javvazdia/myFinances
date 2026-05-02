@@ -25,12 +25,14 @@ import com.myfinances.app.domain.model.integration.ExternalProviderId
 @Composable
 fun SettingsScreen(
     uiState: SettingsUiState,
+    canPickCajaBrowserDownloadsDirectory: Boolean,
     onSelectConnection: (String) -> Unit,
     onProviderFieldChange: (ExternalProviderId, String, String) -> Unit,
     onTestProviderConnection: (ExternalProviderId) -> Unit,
     onConnectProvider: (ExternalProviderId) -> Unit,
     onRunProviderSync: (ExternalProviderId) -> Unit,
     onRunCajaBrowserSync: () -> Unit,
+    onPickCajaBrowserDownloadsDirectory: () -> Unit,
     onRequestDisconnectConnection: (String) -> Unit,
     onConfirmDisconnectConnection: () -> Unit,
     onDismissDisconnectDialog: () -> Unit,
@@ -76,12 +78,14 @@ fun SettingsScreen(
         item {
             ConnectionsOverviewCard(
                 uiState = uiState,
+                canPickCajaBrowserDownloadsDirectory = canPickCajaBrowserDownloadsDirectory,
                 onSelectConnection = onSelectConnection,
                 onProviderFieldChange = onProviderFieldChange,
                 onTestProviderConnection = onTestProviderConnection,
                 onConnectProvider = onConnectProvider,
                 onRunProviderSync = onRunProviderSync,
                 onRunCajaBrowserSync = onRunCajaBrowserSync,
+                onPickCajaBrowserDownloadsDirectory = onPickCajaBrowserDownloadsDirectory,
                 onRequestDisconnectConnection = onRequestDisconnectConnection,
             )
         }

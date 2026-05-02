@@ -16,6 +16,7 @@ import com.myfinances.app.domain.repository.ExternalConnectionsRepository
 import com.myfinances.app.domain.repository.LedgerRepository
 import com.myfinances.app.integrations.ExternalProviderConnector
 import com.myfinances.app.integrations.cajaingenieros.sync.CajaIngenierosBrowserSyncService
+import com.myfinances.app.platform.DirectoryPickerService
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -95,6 +96,7 @@ class SettingsViewModel(
     private val externalConnectionsRepository: ExternalConnectionsRepository,
     private val providerConnectors: Map<ExternalProviderId, ExternalProviderConnector>,
     private val cajaIngenierosBrowserSyncService: CajaIngenierosBrowserSyncService,
+    private val directoryPickerService: DirectoryPickerService,
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(SettingsUiState())
     val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()
@@ -388,6 +390,10 @@ class SettingsViewModel(
 
         viewModelScope.launch {
             val connectionId = ensureCajaIngenierosBrowserConnection()
+            val downloadsDirectory = uiState.value.providerState(providerId)
+                .fieldValue(CAJA_BROWSER_DOWNLOADS_DIR_FIELD)
+                .trim()
+                .ifBlank { null }
 
             _uiState.update { currentState ->
                 currentState.copy(
@@ -395,7 +401,7 @@ class SettingsViewModel(
                     providerStates = currentState.providerStates.updated(providerId) { providerState ->
                         providerState.copy(
                             isSyncing = true,
-                            message = "Browser sync started. myFinances opened your default browser. Log in to Caja Ingenieros, navigate to your statement or movements page, and download a PDF into your normal Downloads folder. myFinances will import the first new PDF automatically.",
+                            message = browserSyncWaitingMessage(downloadsDirectory),
                             error = null,
                         )
                     },
@@ -403,7 +409,21 @@ class SettingsViewModel(
             }
 
             runCatching {
-                cajaIngenierosBrowserSyncService.runAssistedStatementSync(connectionId)
+                cajaIngenierosBrowserSyncService.runAssistedStatementSync(
+                    connectionId = connectionId,
+                    downloadsDirectory = downloadsDirectory,
+                ) { progressMessage ->
+                    _uiState.update { currentState ->
+                        currentState.copy(
+                            providerStates = currentState.providerStates.updated(providerId) { providerState ->
+                                providerState.copy(
+                                    message = progressMessage,
+                                    error = null,
+                                )
+                            },
+                        )
+                    }
+                }
             }.onSuccess { syncRun ->
                 _uiState.update { currentState ->
                     currentState.copy(
@@ -429,6 +449,32 @@ class SettingsViewModel(
                         },
                     )
                 }
+            }
+        }
+    }
+
+    fun pickCajaBrowserDownloadsDirectory() {
+        if (!directoryPickerService.isSupported) {
+            return
+        }
+
+        viewModelScope.launch {
+            val providerId = ExternalProviderId.CAJA_INGENIEROS
+            val initialPath = uiState.value.providerState(providerId)
+                .fieldValue(CAJA_BROWSER_DOWNLOADS_DIR_FIELD)
+                .trim()
+                .ifBlank { null }
+            val selectedPath = directoryPickerService.pickDirectory(initialPath) ?: return@launch
+            _uiState.update { currentState ->
+                currentState.copy(
+                    providerStates = currentState.providerStates.updated(providerId) { providerState ->
+                        providerState.copy(
+                            draftFields = providerState.draftFields + (CAJA_BROWSER_DOWNLOADS_DIR_FIELD to selectedPath),
+                            message = null,
+                            error = null,
+                        )
+                    },
+                )
             }
         }
     }
@@ -765,6 +811,14 @@ internal fun SettingsUiState.providerState(
 
 internal fun ProviderConnectionUiState.fieldValue(fieldId: String): String =
     draftFields[fieldId].orEmpty()
+
+internal const val CAJA_BROWSER_DOWNLOADS_DIR_FIELD: String = "browserDownloadsDirectory"
+
+internal fun browserSyncFolderLabel(downloadsDirectory: String?): String =
+    downloadsDirectory?.trim()?.takeIf(String::isNotBlank) ?: "your default Downloads folder"
+
+internal fun browserSyncWaitingMessage(downloadsDirectory: String?): String =
+    "Browser sync started. myFinances opened your default browser. Log in to Caja Ingenieros, navigate to your statement or movements page, and download a PDF into ${browserSyncFolderLabel(downloadsDirectory)}. myFinances will import the first new PDF automatically."
 
 private fun providerDisplayName(providerId: ExternalProviderId): String =
     ExternalProviderCatalog.availableProviders.firstOrNull { provider ->

@@ -31,7 +31,11 @@ class DesktopCajaIngenierosBrowserSyncService(
 ) : CajaIngenierosBrowserSyncService {
     override val isSupported: Boolean = statementImportService.isSupported
 
-    override suspend fun runAssistedStatementSync(connectionId: String): ExternalSyncRun? {
+    override suspend fun runAssistedStatementSync(
+        connectionId: String,
+        downloadsDirectory: String?,
+        onProgress: suspend (String) -> Unit,
+    ): ExternalSyncRun? {
         check(isSupported) {
             "Browser-assisted Caja Ingenieros sync is not available on this platform yet."
         }
@@ -41,7 +45,10 @@ class DesktopCajaIngenierosBrowserSyncService(
         markConnectionRunning(connection, startedAt)
 
         return runCatching {
-            val downloadedStatementPath = withContext(Dispatchers.IO) { openBrowserAndWaitForPdf(startedAt) }
+            val downloadedStatementPath = withContext(Dispatchers.IO) {
+                openBrowserAndWaitForPdf(startedAt, downloadsDirectory, onProgress)
+            }
+            onProgress("Detected ${downloadedStatementPath.fileName}. Importing the statement now.")
             val importResult = statementImportService.importCajaIngenierosPdfFromFile(
                 downloadedStatementPath.toAbsolutePath().toString(),
             )
@@ -56,7 +63,7 @@ class DesktopCajaIngenierosBrowserSyncService(
                 importedAccounts = 1,
                 importedTransactions = importResult.importedTransactions,
                 importedPositions = 0,
-                message = buildSuccessMessage(importResult),
+                message = buildSuccessMessage(importResult, downloadedStatementPath),
             )
             externalConnectionsRepository.recordSyncRun(syncRun)
             externalConnectionsRepository.upsertConnection(
@@ -144,13 +151,19 @@ class DesktopCajaIngenierosBrowserSyncService(
     }
 }
 
-private suspend fun openBrowserAndWaitForPdf(startedAtEpochMs: Long): Path {
-    val downloadsDir = defaultDownloadsDirectory()
+private suspend fun openBrowserAndWaitForPdf(
+    startedAtEpochMs: Long,
+    downloadsDirectory: String?,
+    onProgress: suspend (String) -> Unit,
+): Path {
+    val downloadsDir = resolveDownloadsDirectory(downloadsDirectory)
     require(Files.isDirectory(downloadsDir)) {
-        "Could not find the default Downloads folder at ${downloadsDir.toAbsolutePath()}."
+        "Could not find the selected downloads folder at ${downloadsDir.toAbsolutePath()}."
     }
 
+    onProgress("Opening Caja Ingenieros in your default browser.")
     openDefaultBrowser(URI(CAJA_INGENIEROS_START_URL))
+    onProgress("Waiting for a new Caja Ingenieros PDF download in ${downloadsDir.toAbsolutePath()}.")
     return awaitDownloadedPdf(downloadsDir, startedAtEpochMs)
 }
 
@@ -203,14 +216,23 @@ private suspend fun awaitDownloadedPdf(
     )
 }
 
+private fun resolveDownloadsDirectory(overrideDirectory: String?): Path =
+    overrideDirectory
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
+        ?.let(Paths::get)
+        ?: defaultDownloadsDirectory()
+
 private fun defaultDownloadsDirectory(): Path =
     Paths.get(System.getProperty("user.home"), "Downloads")
 
 private fun buildSyncRunId(connectionId: String, timestampMs: Long): String =
     "sync-caja-browser-$connectionId-$timestampMs-${Random.nextInt(1000, 9999)}"
 
-private fun buildSuccessMessage(result: com.myfinances.app.integrations.statements.StatementImportResult): String =
-    "Imported ${result.importedTransactions} new Caja Ingenieros transactions from ${result.sourceFileName}. Skipped ${result.skippedTransactions} already-known rows."
+private fun buildSuccessMessage(
+    result: com.myfinances.app.integrations.statements.StatementImportResult,
+    downloadedStatementPath: Path,
+): String = "Imported ${result.importedTransactions} new Caja Ingenieros transactions from ${downloadedStatementPath.fileName}. Skipped ${result.skippedTransactions} already-known rows."
 
 private class BrowserSyncCanceledException(
     message: String,

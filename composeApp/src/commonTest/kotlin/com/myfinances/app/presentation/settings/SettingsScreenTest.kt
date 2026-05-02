@@ -223,4 +223,17 @@ class SettingsScreenTest {
 
         assertEquals("Mutual | EUR | approx. 1234.56 EUR", buildPreviewAccountSubtitle(preview))
     }
+
+    @Test
+    fun browserSyncFolderLabelFallsBackToDefaultDownloads() {
+        assertEquals("your default Downloads folder", browserSyncFolderLabel(null))
+        assertEquals("your default Downloads folder", browserSyncFolderLabel("   "))
+    }
+
+    @Test
+    fun browserSyncWaitingMessageUsesConfiguredFolder() {
+        val message = browserSyncWaitingMessage("C:\\Users\\Usuario\\Statements")
+
+        assertEquals(true, message.contains("C:\\Users\\Usuario\\Statements"))
+    }
 }

@@ -95,6 +95,7 @@ fun MyFinancesApp(appDependencies: AppDependencies) {
                     externalConnectionsRepository = appDependencies.externalConnectionsRepository,
                     providerConnectors = appDependencies.providerConnectors,
                     cajaIngenierosBrowserSyncService = appDependencies.cajaIngenierosBrowserSyncService,
+                    directoryPickerService = appDependencies.directoryPickerService,
                 )
             }
         }
