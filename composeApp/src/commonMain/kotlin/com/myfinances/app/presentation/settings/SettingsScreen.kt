@@ -33,6 +33,7 @@ fun SettingsScreen(
     onRunProviderSync: (ExternalProviderId) -> Unit,
     onRunCajaBrowserSync: () -> Unit,
     onPickCajaBrowserDownloadsDirectory: () -> Unit,
+    onResetCajaBrowserDownloadsDirectory: () -> Unit,
     onRequestDisconnectConnection: (String) -> Unit,
     onConfirmDisconnectConnection: () -> Unit,
     onDismissDisconnectDialog: () -> Unit,
@@ -86,6 +87,7 @@ fun SettingsScreen(
                 onRunProviderSync = onRunProviderSync,
                 onRunCajaBrowserSync = onRunCajaBrowserSync,
                 onPickCajaBrowserDownloadsDirectory = onPickCajaBrowserDownloadsDirectory,
+                onResetCajaBrowserDownloadsDirectory = onResetCajaBrowserDownloadsDirectory,
                 onRequestDisconnectConnection = onRequestDisconnectConnection,
             )
         }

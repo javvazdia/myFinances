@@ -231,6 +231,12 @@ class SettingsScreenTest {
     }
 
     @Test
+    fun browserSyncFolderDetailLabelFallsBackToDefaultDownloads() {
+        assertEquals("Default Downloads folder", browserSyncFolderDetailLabel(null))
+        assertEquals("Default Downloads folder", browserSyncFolderDetailLabel("   "))
+    }
+
+    @Test
     fun browserSyncWaitingMessageUsesConfiguredFolder() {
         val message = browserSyncWaitingMessage("C:\\Users\\Usuario\\Statements")
 

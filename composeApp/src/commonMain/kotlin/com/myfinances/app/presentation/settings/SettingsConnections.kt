@@ -50,6 +50,7 @@ internal fun ConnectionsOverviewCard(
     onRunProviderSync: (ExternalProviderId) -> Unit,
     onRunCajaBrowserSync: () -> Unit,
     onPickCajaBrowserDownloadsDirectory: () -> Unit,
+    onResetCajaBrowserDownloadsDirectory: () -> Unit,
     onRequestDisconnectConnection: (String) -> Unit,
 ) {
     Card {
@@ -104,6 +105,7 @@ internal fun ConnectionsOverviewCard(
                         onRunSync = onRunProviderSync,
                         onRunCajaBrowserSync = onRunCajaBrowserSync,
                         onPickCajaBrowserDownloadsDirectory = onPickCajaBrowserDownloadsDirectory,
+                        onResetCajaBrowserDownloadsDirectory = onResetCajaBrowserDownloadsDirectory,
                         onRequestDisconnectConnection = onRequestDisconnectConnection,
                     )
                 }
@@ -128,6 +130,7 @@ private fun ProviderSetupCard(
     onRunSync: (ExternalProviderId) -> Unit,
     onRunCajaBrowserSync: () -> Unit,
     onPickCajaBrowserDownloadsDirectory: () -> Unit,
+    onResetCajaBrowserDownloadsDirectory: () -> Unit,
     onRequestDisconnectConnection: (String) -> Unit,
 ) {
     Card(
@@ -182,12 +185,28 @@ private fun ProviderSetupCard(
                         singleLine = true,
                         enabled = !providerState.isTesting && !providerState.isConnecting && !providerState.isSyncing,
                     )
-                    if (canPickCajaBrowserDownloadsDirectory) {
+                    Text(
+                        text = "Current watched folder: ${browserSyncFolderDetailLabel(providerState.fieldValue(CAJA_BROWSER_DOWNLOADS_DIR_FIELD).ifBlank { null })}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        if (canPickCajaBrowserDownloadsDirectory) {
+                            Button(
+                                onClick = onPickCajaBrowserDownloadsDirectory,
+                                enabled = !providerState.isTesting && !providerState.isConnecting && !providerState.isSyncing,
+                            ) {
+                                Text("Choose folder")
+                            }
+                        }
                         Button(
-                            onClick = onPickCajaBrowserDownloadsDirectory,
-                            enabled = !providerState.isTesting && !providerState.isConnecting && !providerState.isSyncing,
+                            onClick = onResetCajaBrowserDownloadsDirectory,
+                            enabled = providerState.fieldValue(CAJA_BROWSER_DOWNLOADS_DIR_FIELD).isNotBlank() &&
+                                !providerState.isTesting &&
+                                !providerState.isConnecting &&
+                                !providerState.isSyncing,
                         ) {
-                            Text("Choose folder")
+                            Text("Use default")
                         }
                     }
                 }
@@ -287,6 +306,11 @@ private fun ProviderSetupCard(
             if (connection != null && isSelectedConnection) {
                 ConnectionDetailSection(
                     connection = connection,
+                    watchedFolderLabel = if (provider.id == ExternalProviderId.CAJA_INGENIEROS) {
+                        browserSyncFolderDetailLabel(providerState.fieldValue(CAJA_BROWSER_DOWNLOADS_DIR_FIELD).ifBlank { null })
+                    } else {
+                        null
+                    },
                     accountLinks = accountLinks,
                     syncRuns = syncRuns,
                     isSyncing = providerState.isSyncing,
@@ -409,6 +433,7 @@ private fun ProviderSetupInstructions(provider: ExternalProviderDefinition) {
 @Composable
 private fun ConnectionDetailSection(
     connection: ExternalConnection,
+    watchedFolderLabel: String?,
     accountLinks: List<ExternalAccountLink>,
     syncRuns: List<ExternalSyncRun>,
     isSyncing: Boolean,
@@ -446,6 +471,9 @@ private fun ConnectionDetailSection(
                     label = "Linked accounts",
                     value = accountLinks.size.toString(),
                 )
+                watchedFolderLabel?.let { folderLabel ->
+                    DetailLine(label = "Watched folder", value = folderLabel)
+                }
             }
         }
 

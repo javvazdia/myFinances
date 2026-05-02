@@ -39,6 +39,7 @@ fun SettingsRoute(
         onRunProviderSync = settingsViewModel::runProviderSync,
         onRunCajaBrowserSync = settingsViewModel::runCajaIngenierosBrowserSync,
         onPickCajaBrowserDownloadsDirectory = settingsViewModel::pickCajaBrowserDownloadsDirectory,
+        onResetCajaBrowserDownloadsDirectory = settingsViewModel::resetCajaBrowserDownloadsDirectory,
         onRequestDisconnectConnection = settingsViewModel::requestDisconnectConnection,
         onConfirmDisconnectConnection = settingsViewModel::confirmDisconnectConnection,
         onDismissDisconnectDialog = settingsViewModel::dismissDisconnectDialog,
