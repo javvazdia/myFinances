@@ -306,6 +306,15 @@ class AccountsScreenTest {
     @Test
     fun toCreateModeClearsSnapshotDraftState() {
         val state = AccountsUiState(
+            selectedLatestSnapshot = AccountValuationSnapshot(
+                id = "snapshot-1",
+                accountId = "account-1",
+                sourceProvider = "Manual snapshot",
+                currencyCode = "EUR",
+                valueMinor = 123_45L,
+                valuationDate = "2026-05-10",
+                capturedAtEpochMs = 1L,
+            ),
             isSnapshotFormVisible = true,
             draftSnapshotValue = "123.45",
             draftSnapshotDate = "2026-05-10",
@@ -314,8 +323,54 @@ class AccountsScreenTest {
         val reset = state.toCreateMode()
 
         assertEquals(false, reset.isSnapshotFormVisible)
+        assertEquals(null, reset.selectedLatestSnapshot)
         assertEquals("", reset.draftSnapshotValue)
         assertEquals("", reset.draftSnapshotDate)
+    }
+
+    @Test
+    fun picksLatestSnapshotUsingValuationDateBeforeCaptureTime() {
+        val latest = latestSnapshotFor(
+            listOf(
+                AccountValuationSnapshot(
+                    id = "snapshot-1",
+                    accountId = "account-1",
+                    sourceProvider = "Manual snapshot",
+                    currencyCode = "EUR",
+                    valueMinor = 100_00L,
+                    valuationDate = "2026-03-31",
+                    capturedAtEpochMs = 3L,
+                ),
+                AccountValuationSnapshot(
+                    id = "snapshot-2",
+                    accountId = "account-1",
+                    sourceProvider = "Manual snapshot",
+                    currencyCode = "EUR",
+                    valueMinor = 120_00L,
+                    valuationDate = "2026-04-30",
+                    capturedAtEpochMs = 2L,
+                ),
+            ),
+        )
+
+        assertEquals("snapshot-2", latest?.id)
+    }
+
+    @Test
+    fun formatsSnapshotSummaryDateFromValuationDate() {
+        val label = formatSnapshotSummaryDate(
+            AccountValuationSnapshot(
+                id = "snapshot-1",
+                accountId = "account-1",
+                sourceProvider = "Manual snapshot",
+                currencyCode = "EUR",
+                valueMinor = 100_00L,
+                valuationDate = "2026-05-10",
+                capturedAtEpochMs = 1L,
+            ),
+        )
+
+        assertEquals("May 10, 2026", label)
     }
 }
 

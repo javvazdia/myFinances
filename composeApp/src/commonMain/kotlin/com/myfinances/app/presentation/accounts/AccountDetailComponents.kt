@@ -20,6 +20,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.myfinances.app.domain.model.Account
+import com.myfinances.app.domain.model.AccountValuationSnapshot
 import com.myfinances.app.domain.model.AccountSourceType
 import com.myfinances.app.domain.model.AccountType
 import com.myfinances.app.domain.model.InvestmentPosition
@@ -28,6 +29,7 @@ import com.myfinances.app.domain.model.InvestmentPosition
 internal fun AccountDetailScreen(
     account: Account,
     currentBalanceMinor: Long,
+    latestSnapshot: AccountValuationSnapshot?,
     historyChart: AccountHistoryChart?,
     availableHistoryModes: List<AccountHistoryMode>,
     selectedHistoryMode: AccountHistoryMode,
@@ -77,6 +79,7 @@ internal fun AccountDetailScreen(
             AccountSummaryCard(
                 account = account,
                 currentBalanceMinor = currentBalanceMinor,
+                latestSnapshot = latestSnapshot,
             )
         }
 
@@ -183,6 +186,7 @@ internal fun AccountDetailScreen(
 private fun AccountSummaryCard(
     account: Account,
     currentBalanceMinor: Long,
+    latestSnapshot: AccountValuationSnapshot?,
 ) {
     Card {
         Column(
@@ -232,6 +236,13 @@ private fun AccountSummaryCard(
             if (account.externalAccountId != null) {
                 Text(
                     text = "Provider account: ${account.externalAccountId}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (latestSnapshot != null) {
+                Text(
+                    text = "Latest recorded snapshot: ${formatMoney(latestSnapshot.valueMinor, latestSnapshot.currencyCode)} on ${formatSnapshotSummaryDate(latestSnapshot)}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

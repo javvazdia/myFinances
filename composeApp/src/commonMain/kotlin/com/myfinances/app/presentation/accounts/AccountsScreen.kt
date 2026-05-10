@@ -52,6 +52,7 @@ fun AccountsScreen(
             account = selectedAccount,
             currentBalanceMinor = uiState.selectedAccountCurrentBalanceMinor
                 ?: selectedAccount.openingBalanceMinor,
+            latestSnapshot = uiState.selectedLatestSnapshot,
             historyChart = uiState.selectedAccountHistoryChart,
             availableHistoryModes = uiState.availableAccountHistoryModes,
             selectedHistoryMode = uiState.selectedAccountHistoryMode,

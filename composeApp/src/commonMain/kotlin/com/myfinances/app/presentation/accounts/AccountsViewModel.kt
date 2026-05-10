@@ -72,6 +72,7 @@ class AccountsViewModel(
                     _uiState.update { currentState ->
                         currentState.copy(
                             selectedAccountId = null,
+                            selectedLatestSnapshot = null,
                             selectedInvestmentPositions = emptyList(),
                             accountHistoryCharts = emptyMap(),
                             selectedAccountHistoryMode = AccountHistoryMode.VALUE,
@@ -327,6 +328,7 @@ class AccountsViewModel(
         _uiState.update { currentState ->
             currentState.toCreateMode().copy(
                 selectedAccountId = accountId,
+                selectedLatestSnapshot = null,
                 accountHistoryCharts = emptyMap(),
                 selectedAccountHistoryMode = AccountHistoryMode.VALUE,
                 selectedAccountHistoryRange = AccountHistoryRange.ALL,
@@ -361,6 +363,7 @@ class AccountsViewModel(
                 val snapshotChart = selectedAccount?.let { account ->
                     buildSnapshotHistoryChart(account = account, snapshots = snapshots)
                 }
+                val latestSnapshot = latestSnapshotFor(snapshots)
                 AppLogger.debug(
                     tag = "AccountsHistory",
                     message = "Rendering snapshot history for $accountId with ${snapshots.size} snapshot(s)",
@@ -379,6 +382,7 @@ class AccountsViewModel(
                                 }
                             }
                         currentState.copy(
+                            selectedLatestSnapshot = latestSnapshot,
                             accountHistoryCharts = updatedCharts,
                             selectedAccountHistoryMode = currentState.selectedAccountHistoryMode
                                 .takeIf(updatedCharts::containsKey)
@@ -406,6 +410,7 @@ class AccountsViewModel(
         _uiState.update { currentState ->
             currentState.copy(
                 selectedAccountId = null,
+                selectedLatestSnapshot = null,
                 selectedInvestmentPositions = emptyList(),
                 accountHistoryCharts = emptyMap(),
                 selectedAccountHistoryMode = AccountHistoryMode.VALUE,

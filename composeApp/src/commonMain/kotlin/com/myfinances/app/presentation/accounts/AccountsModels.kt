@@ -1,6 +1,7 @@
 package com.myfinances.app.presentation.accounts
 
 import com.myfinances.app.domain.model.Account
+import com.myfinances.app.domain.model.AccountValuationSnapshot
 import com.myfinances.app.domain.model.AccountType
 import com.myfinances.app.domain.model.InvestmentPosition
 
@@ -8,6 +9,7 @@ data class AccountsUiState(
     val accounts: List<Account> = emptyList(),
     val currentBalancesByAccountId: Map<String, Long> = emptyMap(),
     val selectedAccountId: String? = null,
+    val selectedLatestSnapshot: AccountValuationSnapshot? = null,
     val selectedInvestmentPositions: List<InvestmentPosition> = emptyList(),
     val accountHistoryCharts: Map<AccountHistoryMode, AccountHistoryChart> = emptyMap(),
     val selectedAccountHistoryMode: AccountHistoryMode = AccountHistoryMode.VALUE,
@@ -126,6 +128,7 @@ data class AccountHistoryPoint(
 internal fun AccountsUiState.toCreateMode(): AccountsUiState =
     copy(
         selectedAccountId = null,
+        selectedLatestSnapshot = null,
         selectedInvestmentPositions = emptyList(),
         accountHistoryCharts = emptyMap(),
         selectedAccountHistoryMode = AccountHistoryMode.VALUE,

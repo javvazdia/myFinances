@@ -1,9 +1,13 @@
 package com.myfinances.app.presentation.accounts
 
 import com.myfinances.app.domain.model.AccountType
+import com.myfinances.app.domain.model.AccountValuationSnapshot
 import com.myfinances.app.domain.model.InvestmentPosition
 import com.myfinances.app.presentation.shared.formatMinorMoney
 import com.myfinances.app.presentation.shared.formatTimestampLabel
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.atStartOfDayIn
 import kotlin.random.Random
 
 internal val AccountType.label: String
@@ -57,6 +61,17 @@ internal fun formatSyncTimestamp(epochMs: Long?): String {
     return formatTimestampLabel(epochMs)
 }
 
+internal fun latestSnapshotFor(snapshots: List<AccountValuationSnapshot>): AccountValuationSnapshot? =
+    snapshots.maxWithOrNull(
+        compareBy<AccountValuationSnapshot> {
+            snapshotSortEpochMs(it)
+        }.thenBy(AccountValuationSnapshot::capturedAtEpochMs),
+    )
+
+internal fun formatSnapshotSummaryDate(snapshot: AccountValuationSnapshot): String =
+    snapshot.valuationDate?.let(::formatSnapshotIsoDate)
+        ?: formatTimestampLabel(snapshot.capturedAtEpochMs)
+
 internal fun buildPositionSubtitle(position: InvestmentPosition): String {
     val assetClass = position.assetClass ?: "Portfolio holding"
     val quantity = position.titles?.let { titles ->
@@ -96,3 +111,30 @@ private fun formatHoldingDecimal(value: Double): String =
         .toString()
         .trimEnd('0')
         .trimEnd('.')
+
+private fun snapshotSortEpochMs(snapshot: AccountValuationSnapshot): Long =
+    snapshot.valuationDate?.let(::parseSnapshotIsoDateEpochMs) ?: snapshot.capturedAtEpochMs
+
+private fun parseSnapshotIsoDateEpochMs(isoDate: String): Long = runCatching {
+    parseSnapshotLocalDate(isoDate)
+        .atStartOfDayIn(TimeZone.currentSystemDefault())
+        .toEpochMilliseconds()
+}.getOrDefault(0L)
+
+private fun formatSnapshotIsoDate(isoDate: String): String = runCatching {
+    formatSnapshotLocalDate(parseSnapshotLocalDate(isoDate))
+}.getOrDefault(isoDate)
+
+private fun parseSnapshotLocalDate(rawValue: String): LocalDate =
+    runCatching { LocalDate.parse(rawValue) }
+        .getOrElse {
+            LocalDate.parse(rawValue.substringBefore('T'))
+        }
+
+private fun formatSnapshotLocalDate(date: LocalDate): String {
+    val month = date.month.name
+        .lowercase()
+        .replaceFirstChar { character -> character.uppercase() }
+        .take(3)
+    return "$month ${date.day}, ${date.year}"
+}
