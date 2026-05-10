@@ -40,12 +40,14 @@ class AccountsViewModel(
             combine(
                 ledgerRepository.observeAccounts(),
                 ledgerRepository.observeAllTransactions(),
-            ) { accounts, transactions ->
-                accounts to transactions
-            }.collect { (accounts, transactions) ->
+                ledgerRepository.observeAllAccountValuationSnapshots(),
+            ) { accounts, transactions, snapshots ->
+                Triple(accounts, transactions, snapshots)
+            }.collect { (accounts, transactions, snapshots) ->
                 val currentBalances = calculateAccountCurrentBalances(
                     accounts = accounts,
                     transactions = transactions,
+                    snapshots = snapshots,
                 )
 
                 _uiState.update { currentState ->

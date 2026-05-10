@@ -45,6 +45,7 @@ class DefaultFinanceRepository(
         val totalBalanceMinor = calculateAccountCurrentBalances(
             accounts = accounts,
             transactions = allTransactions,
+            snapshots = allSnapshots,
         ).values.sum()
         val nowEpochMs = Clock.System.now().toEpochMilliseconds()
         val cashFlow = calculateOverviewCashFlow(
@@ -167,7 +168,6 @@ private fun buildOverviewLineForAccount(
     snapshots: List<AccountValuationSnapshot>,
 ): OverviewHistoryLine? {
     val points = if (
-        account.sourceType == AccountSourceType.API_SYNC &&
         account.type == AccountType.INVESTMENT &&
         snapshots.isNotEmpty()
     ) {

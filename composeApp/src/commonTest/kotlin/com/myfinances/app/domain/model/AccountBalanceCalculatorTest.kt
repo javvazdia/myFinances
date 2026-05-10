@@ -57,6 +57,40 @@ class AccountBalanceCalculatorTest {
     }
 
     @Test
+    fun usesLatestSnapshotAsCurrentValueForManualInvestmentAccounts() {
+        val account = Account(
+            id = "account-helvetia-1",
+            name = "Helvetia",
+            type = AccountType.INVESTMENT,
+            currencyCode = "EUR",
+            openingBalanceMinor = 5_000_00,
+            sourceType = AccountSourceType.MANUAL,
+            sourceProvider = null,
+            externalAccountId = null,
+            lastSyncedAtEpochMs = null,
+            isArchived = false,
+            createdAtEpochMs = 1L,
+            updatedAtEpochMs = 1L,
+        )
+
+        val balance = calculateAccountCurrentBalance(
+            account = account,
+            transactions = emptyList(),
+            latestSnapshot = AccountValuationSnapshot(
+                id = "snapshot-1",
+                accountId = account.id,
+                sourceProvider = "Manual snapshot",
+                currencyCode = "EUR",
+                valueMinor = 8_250_00,
+                valuationDate = "2026-05-10",
+                capturedAtEpochMs = 2L,
+            ),
+        )
+
+        assertEquals(8_250_00, balance)
+    }
+
+    @Test
     fun keepsSyncedInvestmentBalanceAsCurrentSnapshot() {
         val account = Account(
             id = "account-indexa-1",
@@ -90,6 +124,20 @@ class AccountBalanceCalculatorTest {
             ),
         )
 
-        assertEquals(12_345_67, calculateAccountCurrentBalance(account, transactions))
+        val balance = calculateAccountCurrentBalance(
+            account = account,
+            transactions = transactions,
+            latestSnapshot = AccountValuationSnapshot(
+                id = "snapshot-1",
+                accountId = account.id,
+                sourceProvider = "Indexa",
+                currencyCode = "EUR",
+                valueMinor = 12_500_00,
+                valuationDate = "2026-05-10",
+                capturedAtEpochMs = 2L,
+            ),
+        )
+
+        assertEquals(12_500_00, balance)
     }
 }

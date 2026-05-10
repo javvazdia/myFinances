@@ -174,6 +174,44 @@ class DefaultFinanceRepositoryTest {
         assertEquals(epochMsOf(2026, 2, 1), accountLine?.points?.first()?.timestampEpochMs)
         assertEquals(75_00L, accountLine?.points?.last()?.valueMinor)
     }
+
+    @Test
+    fun manualInvestmentAccountsUseSnapshotsForOverviewHistory() {
+        val history = buildOverviewHistory(
+            accounts = listOf(
+                account(
+                    id = "acc-helvetia",
+                    name = "Helvetia",
+                    sourceType = AccountSourceType.MANUAL,
+                    type = AccountType.INVESTMENT,
+                ),
+            ),
+            allTransactions = emptyList(),
+            allSnapshots = listOf(
+                snapshot(
+                    id = "snap-1",
+                    accountId = "acc-helvetia",
+                    valueMinor = 7_800_00L,
+                    valuationDate = "2026-03-31",
+                ),
+                snapshot(
+                    id = "snap-2",
+                    accountId = "acc-helvetia",
+                    valueMinor = 8_100_00L,
+                    valuationDate = "2026-04-30",
+                ),
+            ),
+            period = OverviewPeriodFilter.ALL,
+            nowEpochMs = epochMsOf(2026, 5, 10),
+        )
+
+        val helvetiaLine = history?.lines?.firstOrNull { line -> !line.isTotal }
+
+        assertEquals("Helvetia", helvetiaLine?.label)
+        assertEquals(2, helvetiaLine?.points?.size)
+        assertEquals(7_800_00L, helvetiaLine?.points?.first()?.valueMinor)
+        assertEquals(8_100_00L, helvetiaLine?.points?.last()?.valueMinor)
+    }
 }
 
 private fun transaction(
