@@ -16,6 +16,9 @@ data class AccountsUiState(
     val customAccountHistoryEndEpochMs: Long? = null,
     val isLoadingAccountHistory: Boolean = false,
     val accountHistoryErrorMessage: String? = null,
+    val isSnapshotFormVisible: Boolean = false,
+    val draftSnapshotValue: String = "",
+    val draftSnapshotDate: String = "",
     val draftName: String = "",
     val selectedType: AccountType = AccountType.CHECKING,
     val draftCurrencyCode: String = "EUR",
@@ -46,6 +49,9 @@ data class AccountsUiState(
 
     val isBusy: Boolean
         get() = isSaving || pendingDeleteAccountId != null
+
+    val canRecordManualSnapshot: Boolean
+        get() = selectedAccount != null
 
     val selectedAccountHistoryChart: AccountHistoryChart?
         get() = accountHistoryCharts[selectedAccountHistoryMode]
@@ -128,6 +134,9 @@ internal fun AccountsUiState.toCreateMode(): AccountsUiState =
         customAccountHistoryEndEpochMs = null,
         isLoadingAccountHistory = false,
         accountHistoryErrorMessage = null,
+        isSnapshotFormVisible = false,
+        draftSnapshotValue = "",
+        draftSnapshotDate = "",
         draftName = "",
         selectedType = AccountType.CHECKING,
         draftOpeningBalance = "",

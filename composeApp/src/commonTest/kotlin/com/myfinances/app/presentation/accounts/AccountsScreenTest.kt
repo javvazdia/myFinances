@@ -302,6 +302,21 @@ class AccountsScreenTest {
         assertEquals(1, filtered.size)
         assertEquals("Mar 15, 2025", filtered.single().detailLabel)
     }
+
+    @Test
+    fun toCreateModeClearsSnapshotDraftState() {
+        val state = AccountsUiState(
+            isSnapshotFormVisible = true,
+            draftSnapshotValue = "123.45",
+            draftSnapshotDate = "2026-05-10",
+        )
+
+        val reset = state.toCreateMode()
+
+        assertEquals(false, reset.isSnapshotFormVisible)
+        assertEquals("", reset.draftSnapshotValue)
+        assertEquals("", reset.draftSnapshotDate)
+    }
 }
 
 private fun parseTestEpoch(isoDate: String): Long =

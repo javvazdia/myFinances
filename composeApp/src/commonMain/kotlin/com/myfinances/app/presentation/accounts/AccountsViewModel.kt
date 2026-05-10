@@ -3,6 +3,7 @@ package com.myfinances.app.presentation.accounts
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.myfinances.app.domain.model.Account
+import com.myfinances.app.domain.model.AccountValuationSnapshot
 import com.myfinances.app.domain.model.AccountSourceType
 import com.myfinances.app.domain.model.AccountType
 import com.myfinances.app.domain.model.calculateAccountCurrentBalances
@@ -18,6 +19,9 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 import kotlin.time.Clock
 
 class AccountsViewModel(
@@ -138,6 +142,97 @@ class AccountsViewModel(
                 draftOpeningBalance = value,
                 errorMessage = null,
             )
+        }
+    }
+
+    fun showSnapshotForm() {
+        _uiState.update { currentState ->
+            val selectedAccount = currentState.selectedAccount ?: return@update currentState
+            currentState.copy(
+                isSnapshotFormVisible = true,
+                draftSnapshotValue = formatAccountAmountInput(
+                    currentState.selectedAccountCurrentBalanceMinor ?: selectedAccount.openingBalanceMinor,
+                ),
+                draftSnapshotDate = todayLocalDate(),
+                errorMessage = null,
+            )
+        }
+    }
+
+    fun hideSnapshotForm() {
+        _uiState.update { currentState ->
+            currentState.copy(
+                isSnapshotFormVisible = false,
+                draftSnapshotValue = "",
+                draftSnapshotDate = "",
+                errorMessage = null,
+            )
+        }
+    }
+
+    fun onSnapshotValueChange(value: String) {
+        _uiState.update { currentState ->
+            currentState.copy(
+                draftSnapshotValue = value,
+                errorMessage = null,
+            )
+        }
+    }
+
+    fun onSnapshotDateChange(value: String) {
+        _uiState.update { currentState ->
+            currentState.copy(
+                draftSnapshotDate = value,
+                errorMessage = null,
+            )
+        }
+    }
+
+    fun saveSnapshot() {
+        val snapshot = uiState.value
+        val selectedAccount = snapshot.selectedAccount
+        val valueMinor = parseAmountToMinor(snapshot.draftSnapshotValue)
+        val valuationDate = snapshot.draftSnapshotDate.trim()
+        val parsedDate = runCatching { LocalDate.parse(valuationDate) }.getOrNull()
+
+        val error = when {
+            selectedAccount == null -> "Select an account before recording a snapshot."
+            valueMinor == null -> "Snapshot value must be a valid number with up to 2 decimals."
+            parsedDate == null -> "Snapshot date must use YYYY-MM-DD."
+            else -> null
+        }
+
+        if (error != null) {
+            _uiState.update { currentState ->
+                currentState.copy(errorMessage = error)
+            }
+            return
+        }
+
+        val account = selectedAccount ?: return
+        val validatedValueMinor = valueMinor ?: return
+
+        viewModelScope.launch {
+            val now = Clock.System.now().toEpochMilliseconds()
+            ledgerRepository.upsertAccountValuationSnapshot(
+                AccountValuationSnapshot(
+                    id = "snapshot-manual-${account.id}-$now",
+                    accountId = account.id,
+                    sourceProvider = account.sourceProvider ?: "Manual snapshot",
+                    currencyCode = account.currencyCode,
+                    valueMinor = validatedValueMinor,
+                    valuationDate = valuationDate,
+                    capturedAtEpochMs = now,
+                ),
+            )
+            _uiState.update { currentState ->
+                currentState.copy(
+                    isSnapshotFormVisible = false,
+                    draftSnapshotValue = "",
+                    draftSnapshotDate = "",
+                    errorMessage = null,
+                )
+            }
         }
     }
 
@@ -514,3 +609,9 @@ class AccountsViewModel(
         }
     }
 }
+
+private fun todayLocalDate(): String =
+    Clock.System.now()
+        .toLocalDateTime(TimeZone.currentSystemDefault())
+        .date
+        .toString()

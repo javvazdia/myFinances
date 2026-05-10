@@ -11,6 +11,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -35,10 +36,18 @@ internal fun AccountDetailScreen(
     customHistoryEndEpochMs: Long?,
     isLoadingHistory: Boolean,
     historyErrorMessage: String?,
+    isSnapshotFormVisible: Boolean,
+    draftSnapshotValue: String,
+    draftSnapshotDate: String,
     positions: List<InvestmentPosition>,
     onSelectHistoryMode: (AccountHistoryMode) -> Unit,
     onSelectHistoryRange: (AccountHistoryRange) -> Unit,
     onApplyCustomHistoryRange: (Long, Long) -> Unit,
+    onShowSnapshotForm: () -> Unit,
+    onHideSnapshotForm: () -> Unit,
+    onSnapshotValueChange: (String) -> Unit,
+    onSnapshotDateChange: (String) -> Unit,
+    onSaveSnapshot: () -> Unit,
     onBack: () -> Unit,
     onEditAccount: (String) -> Unit,
     onRequestDeleteAccount: (String) -> Unit,
@@ -84,6 +93,21 @@ internal fun AccountDetailScreen(
                 onSelectMode = onSelectHistoryMode,
                 onSelectRange = onSelectHistoryRange,
                 onApplyCustomRange = onApplyCustomHistoryRange,
+            )
+        }
+
+        item {
+            SnapshotRecorderCard(
+                account = account,
+                isFormVisible = isSnapshotFormVisible,
+                draftSnapshotValue = draftSnapshotValue,
+                draftSnapshotDate = draftSnapshotDate,
+                canInteract = canInteract,
+                onShowSnapshotForm = onShowSnapshotForm,
+                onHideSnapshotForm = onHideSnapshotForm,
+                onSnapshotValueChange = onSnapshotValueChange,
+                onSnapshotDateChange = onSnapshotDateChange,
+                onSaveSnapshot = onSaveSnapshot,
             )
         }
 
@@ -264,5 +288,81 @@ private fun EmptyDetailCard(message: String) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
         )
+    }
+}
+
+@Composable
+private fun SnapshotRecorderCard(
+    account: Account,
+    isFormVisible: Boolean,
+    draftSnapshotValue: String,
+    draftSnapshotDate: String,
+    canInteract: Boolean,
+    onShowSnapshotForm: () -> Unit,
+    onHideSnapshotForm: () -> Unit,
+    onSnapshotValueChange: (String) -> Unit,
+    onSnapshotDateChange: (String) -> Unit,
+    onSaveSnapshot: () -> Unit,
+) {
+    Card {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                text = "Manual snapshots",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = "Useful for providers like Helvetia where you can see the account value but don’t have a direct sync or export.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            if (!isFormVisible) {
+                TextButton(
+                    onClick = onShowSnapshotForm,
+                    enabled = canInteract,
+                ) {
+                    Text("Record snapshot")
+                }
+            } else {
+                OutlinedTextField(
+                    value = draftSnapshotValue,
+                    onValueChange = onSnapshotValueChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Value (${account.currencyCode})") },
+                    supportingText = { Text("Use the current Helvetia or provider value with up to 2 decimals.") },
+                    singleLine = true,
+                    enabled = canInteract,
+                )
+                OutlinedTextField(
+                    value = draftSnapshotDate,
+                    onValueChange = onSnapshotDateChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Valuation date") },
+                    supportingText = { Text("Format: YYYY-MM-DD") },
+                    singleLine = true,
+                    enabled = canInteract,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    TextButton(
+                        onClick = onSaveSnapshot,
+                        enabled = canInteract,
+                    ) {
+                        Text("Save snapshot")
+                    }
+                    TextButton(
+                        onClick = onHideSnapshotForm,
+                        enabled = canInteract,
+                    ) {
+                        Text("Cancel")
+                    }
+                }
+            }
+        }
     }
 }
