@@ -12,6 +12,7 @@ data class OverviewUiState(
     val selectedPeriod: OverviewPeriodFilter = OverviewPeriodFilter.ONE_MONTH,
     val customStartEpochMs: Long? = null,
     val customEndEpochMs: Long? = null,
+    val selectedHistoryLineId: String? = null,
     val focusMessage: String = "",
     val history: OverviewHistory? = null,
     val recentTransactions: List<RecentTransaction> = emptyList(),

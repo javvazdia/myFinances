@@ -19,6 +19,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -91,7 +92,11 @@ internal fun OverviewPeriodFilterCard(
 }
 
 @Composable
-internal fun OverviewHistoryCard(history: OverviewHistory?) {
+internal fun OverviewHistoryCard(
+    history: OverviewHistory?,
+    selectedLineId: String?,
+    onSelectLine: (String?) -> Unit,
+) {
     Card {
         Column(
             modifier = Modifier
@@ -119,8 +124,33 @@ internal fun OverviewHistoryCard(history: OverviewHistory?) {
                 return@Column
             }
 
-            OverviewHistoryLegend(lines = history.lines)
-            MultiLineOverviewChart(history = history)
+            val visibleHistory = history.filteredForLine(selectedLineId)
+            val selectedLineLabel = history.selectedLineLabel(selectedLineId)
+
+            OverviewHistoryLegend(
+                lines = history.lines,
+                selectedLineId = selectedLineId,
+                onSelectLine = onSelectLine,
+            )
+            if (selectedLineLabel != null) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(
+                        text = "Showing $selectedLineLabel",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    TextButton(onClick = { onSelectLine(null) }) {
+                        Text("Show all")
+                    }
+                }
+            }
+            MultiLineOverviewChart(
+                history = visibleHistory,
+                colorReferenceLines = history.lines,
+            )
         }
     }
 }
@@ -157,16 +187,24 @@ internal fun MetricHighlight(
 }
 
 @Composable
-private fun OverviewHistoryLegend(lines: List<OverviewHistoryLine>) {
+private fun OverviewHistoryLegend(
+    lines: List<OverviewHistoryLine>,
+    selectedLineId: String?,
+    onSelectLine: (String?) -> Unit,
+) {
     Row(
         modifier = Modifier.horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        lines.forEachIndexed { index, line ->
-            val color = overviewChartColor(index, line.isTotal)
+        lines.forEach { line ->
+            val isSelected = line.id == selectedLineId || (line.isTotal && selectedLineId == null)
+            val color = overviewLineColor(line = line, allLines = lines)
             Card(
+                onClick = {
+                    onSelectLine(if (line.isTotal) null else line.id)
+                },
                 colors = CardDefaults.cardColors(
-                    containerColor = if (line.isTotal) {
+                    containerColor = if (isSelected) {
                         MaterialTheme.colorScheme.primaryContainer
                     } else {
                         MaterialTheme.colorScheme.surfaceVariant
@@ -185,7 +223,7 @@ private fun OverviewHistoryLegend(lines: List<OverviewHistoryLine>) {
                     Text(
                         text = line.label,
                         style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = if (line.isTotal) FontWeight.SemiBold else FontWeight.Normal,
+                        fontWeight = if (isSelected || line.isTotal) FontWeight.SemiBold else FontWeight.Normal,
                     )
                 }
             }
@@ -195,7 +233,10 @@ private fun OverviewHistoryLegend(lines: List<OverviewHistoryLine>) {
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-private fun MultiLineOverviewChart(history: OverviewHistory) {
+private fun MultiLineOverviewChart(
+    history: OverviewHistory,
+    colorReferenceLines: List<OverviewHistoryLine>,
+) {
     var chartSize by remember { mutableStateOf(IntSize.Zero) }
     val allPoints = history.lines.flatMap(OverviewHistoryLine::points)
     val minValue = allPoints.minOfOrNull { point -> point.valueMinor } ?: 0L
@@ -229,10 +270,10 @@ private fun MultiLineOverviewChart(history: OverviewHistory) {
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
-                history.lines.forEachIndexed { index, line ->
+                history.lines.forEach { line ->
                     val selectedLinePoint = line.points
                         .lastOrNull { linePoint -> linePoint.timestampEpochMs <= point.timestampEpochMs }
-                        ?: return@forEachIndexed
+                        ?: return@forEach
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -240,7 +281,7 @@ private fun MultiLineOverviewChart(history: OverviewHistory) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text(
                                 text = "\u25A0",
-                                color = overviewChartColor(index, line.isTotal),
+                                color = overviewLineColor(line = line, allLines = colorReferenceLines),
                                 style = MaterialTheme.typography.bodySmall,
                             )
                             Text(
@@ -326,7 +367,7 @@ private fun MultiLineOverviewChart(history: OverviewHistory) {
             val height = chartSize.height.toFloat().takeIf { it > 0f } ?: size.height
             if (width <= 0f || height <= 0f) return@Canvas
 
-            history.lines.forEachIndexed { index, line ->
+            history.lines.forEach { line ->
                 val coordinates = line.points.map { point ->
                     val normalizedX = normalizeX(point.timestampEpochMs, history)
                     val normalizedY = ((point.valueMinor - minValue).toFloat() / range.toFloat())
@@ -335,7 +376,7 @@ private fun MultiLineOverviewChart(history: OverviewHistory) {
                         y = height - (normalizedY * height),
                     )
                 }
-                if (coordinates.isEmpty()) return@forEachIndexed
+                if (coordinates.isEmpty()) return@forEach
 
                 val path = Path().apply {
                     coordinates.forEachIndexed { pointIndex, offset ->
@@ -344,7 +385,7 @@ private fun MultiLineOverviewChart(history: OverviewHistory) {
                 }
                 drawPath(
                     path = path,
-                    color = overviewChartColor(index, line.isTotal),
+                    color = overviewLineColor(line = line, allLines = colorReferenceLines),
                     style = Stroke(width = if (line.isTotal) 7f else 4f),
                 )
 
@@ -356,7 +397,7 @@ private fun MultiLineOverviewChart(history: OverviewHistory) {
                     val normalizedX = normalizeX(selectedLinePoint.timestampEpochMs, history)
                     val normalizedY = ((selectedLinePoint.valueMinor - minValue).toFloat() / range.toFloat())
                     drawCircle(
-                        color = overviewChartColor(index, line.isTotal),
+                        color = overviewLineColor(line = line, allLines = colorReferenceLines),
                         radius = if (line.isTotal) 7f else 5f,
                         center = Offset(
                             x = normalizedX * width,
@@ -475,7 +516,7 @@ private fun denormalizeX(
     return minTimestamp + (normalizedX * range.toFloat()).toLong()
 }
 
-private fun overviewChartColor(
+internal fun overviewChartColor(
     index: Int,
     isTotal: Boolean,
 ): Color {

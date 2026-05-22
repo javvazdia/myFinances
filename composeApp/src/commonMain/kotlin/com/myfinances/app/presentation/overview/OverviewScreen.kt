@@ -35,6 +35,7 @@ fun OverviewRoute(
         uiState = uiState,
         onSelectPeriod = overviewViewModel::selectPeriod,
         onApplyCustomPeriod = overviewViewModel::applyCustomPeriod,
+        onSelectHistoryLine = overviewViewModel::selectHistoryLine,
     )
 }
 
@@ -43,6 +44,7 @@ fun OverviewScreen(
     uiState: OverviewUiState,
     onSelectPeriod: (OverviewPeriodFilter) -> Unit,
     onApplyCustomPeriod: (Long, Long) -> Unit,
+    onSelectHistoryLine: (String?) -> Unit,
 ) {
     var isCustomRangePickerVisible by remember { mutableStateOf(false) }
 
@@ -91,7 +93,11 @@ fun OverviewScreen(
         }
 
         item {
-            OverviewHistoryCard(history = uiState.history)
+            OverviewHistoryCard(
+                history = uiState.history,
+                selectedLineId = uiState.selectedHistoryLineId,
+                onSelectLine = onSelectHistoryLine,
+            )
         }
 
         item {

@@ -18,6 +18,7 @@ class OverviewViewModel(
     private val selectedPeriod = MutableStateFlow(OverviewPeriodFilter.ONE_MONTH)
     private val customStartEpochMs = MutableStateFlow<Long?>(null)
     private val customEndEpochMs = MutableStateFlow<Long?>(null)
+    private val selectedHistoryLineId = MutableStateFlow<String?>(null)
     private val _uiState = MutableStateFlow(OverviewUiState())
     val uiState: StateFlow<OverviewUiState> = _uiState.asStateFlow()
 
@@ -39,7 +40,18 @@ class OverviewViewModel(
                     customStartEpochMs = selection.customStartEpochMs,
                     customEndEpochMs = selection.customEndEpochMs,
                 )
-            }.collect { snapshot ->
+            }.let { overviewSnapshots ->
+                kotlinx.coroutines.flow.combine(
+                    overviewSnapshots,
+                    selectedHistoryLineId,
+                ) { snapshot, selectedLineId ->
+                    snapshot to selectedLineId
+                }
+            }.collect { (snapshot, selectedLineId) ->
+                val resolvedSelectedLineId = selectedLineId
+                    ?.takeIf { lineId ->
+                        snapshot.history?.lines?.any { line -> !line.isTotal && line.id == lineId } == true
+                    }
                 _uiState.value = OverviewUiState(
                     totalBalance = snapshot.totalBalance,
                     income = snapshot.income,
@@ -48,10 +60,14 @@ class OverviewViewModel(
                     selectedPeriod = selectedPeriod.value,
                     customStartEpochMs = customStartEpochMs.value,
                     customEndEpochMs = customEndEpochMs.value,
+                    selectedHistoryLineId = resolvedSelectedLineId,
                     focusMessage = snapshot.focusMessage,
                     history = snapshot.history,
                     recentTransactions = snapshot.recentTransactions,
                 )
+                if (selectedLineId != resolvedSelectedLineId) {
+                    selectedHistoryLineId.value = resolvedSelectedLineId
+                }
             }
         }
     }
@@ -68,6 +84,11 @@ class OverviewViewModel(
         customStartEpochMs.value = startEpochMs
         customEndEpochMs.value = endEpochMs
         selectedPeriod.value = OverviewPeriodFilter.CUSTOM
+    }
+
+    fun selectHistoryLine(lineId: String?) {
+        selectedHistoryLineId.value = lineId
+            ?.takeIf { selectedId -> selectedHistoryLineId.value != selectedId }
     }
 }
 
