@@ -26,4 +26,16 @@ class ExternalIntegrationModelsTest {
         assertTrue(caja.capabilities.contains(ExternalProviderCapability.ACCOUNT_DISCOVERY))
         assertTrue(caja.capabilities.contains(ExternalProviderCapability.CASH_TRANSACTIONS_SYNC))
     }
+
+    @Test
+    fun providerCatalogIncludesDegiroAsFileImportProvider() {
+        val degiro = ExternalProviderCatalog.availableProviders.first { provider ->
+            provider.id == ExternalProviderId.DEGIRO
+        }
+
+        assertEquals(ExternalIntegrationStage.SCAFFOLDED, degiro.stage)
+        assertTrue(degiro.capabilities.contains(ExternalProviderCapability.HOLDINGS_SYNC))
+        assertTrue(degiro.capabilities.contains(ExternalProviderCapability.MANUAL_SYNC))
+        assertTrue(degiro.credentialFields.isEmpty())
+    }
 }

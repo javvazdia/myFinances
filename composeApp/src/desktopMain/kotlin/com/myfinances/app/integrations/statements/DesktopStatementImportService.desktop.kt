@@ -3,11 +3,15 @@ package com.myfinances.app.integrations.statements
 import com.myfinances.app.domain.model.Account
 import com.myfinances.app.domain.model.AccountSourceType
 import com.myfinances.app.domain.model.AccountType
+import com.myfinances.app.domain.model.AccountValuationSnapshot
 import com.myfinances.app.domain.model.FinanceTransaction
+import com.myfinances.app.domain.model.InvestmentPosition
 import com.myfinances.app.domain.model.TransactionType
 import com.myfinances.app.domain.repository.LedgerRepository
 import com.myfinances.app.integrations.cajaingenieros.importer.CajaIngenierosPdfStatement
 import com.myfinances.app.integrations.cajaingenieros.importer.CajaIngenierosPdfStatementParser
+import com.myfinances.app.integrations.degiro.importer.DegiroPortfolioCsv
+import com.myfinances.app.integrations.degiro.importer.DegiroPortfolioCsvParser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.swing.Swing
@@ -15,6 +19,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.atStartOfDayIn
+import kotlinx.datetime.toLocalDateTime
 import org.apache.pdfbox.Loader
 import org.apache.pdfbox.text.PDFTextStripper
 import java.io.File
@@ -24,6 +29,8 @@ import kotlin.math.abs
 import kotlin.time.Clock
 
 private const val CAJA_INGENIEROS_PDF_SOURCE = "Caja Ingenieros PDF"
+private const val DEGIRO_PORTFOLIO_CSV_SOURCE = "DEGIRO Portfolio CSV"
+private const val DEGIRO_PORTFOLIO_EXTERNAL_ID = "degiro-portfolio"
 
 class DesktopStatementImportService(
     private val ledgerRepository: LedgerRepository,
@@ -39,6 +46,19 @@ class DesktopStatementImportService(
         val file = File(filePath)
         val statement = withContext(Dispatchers.IO) { extractAndParseStatement(file) }
         return withContext(Dispatchers.IO) { importStatement(file, statement) }
+    }
+
+    override suspend fun importDegiroPortfolioCsv(): PortfolioImportResult? {
+        val selectedFile = withContext(Dispatchers.Swing) { chooseCsvFile() } ?: return null
+        return importDegiroPortfolioCsvFromFile(selectedFile.absolutePath)
+    }
+
+    override suspend fun importDegiroPortfolioCsvFromFile(filePath: String): PortfolioImportResult {
+        val file = File(filePath)
+        val portfolio = withContext(Dispatchers.IO) {
+            DegiroPortfolioCsvParser.parse(file.readText())
+        }
+        return withContext(Dispatchers.IO) { importDegiroPortfolio(file, portfolio) }
     }
 
     private suspend fun importStatement(
@@ -142,6 +162,74 @@ class DesktopStatementImportService(
             sourceFileName = file.name,
         )
     }
+
+    private suspend fun importDegiroPortfolio(
+        file: File,
+        portfolio: DegiroPortfolioCsv,
+    ): PortfolioImportResult {
+        val now = Clock.System.now().toEpochMilliseconds()
+        val valuationDate = todayIsoDate()
+        val existingAccounts = ledgerRepository.observeAccounts(includeArchived = true).first()
+        val existingAccount = existingAccounts.firstOrNull { account ->
+            account.sourceProvider == DEGIRO_PORTFOLIO_CSV_SOURCE ||
+                account.externalAccountId == DEGIRO_PORTFOLIO_EXTERNAL_ID
+        }
+        val accountId = existingAccount?.id ?: "account-file-degiro-portfolio"
+        val account = Account(
+            id = accountId,
+            name = existingAccount?.name ?: "DEGIRO Portfolio",
+            type = AccountType.INVESTMENT,
+            currencyCode = portfolio.currencyCode,
+            openingBalanceMinor = existingAccount?.openingBalanceMinor ?: portfolio.totalValueMinor,
+            sourceType = AccountSourceType.FILE_IMPORT,
+            sourceProvider = DEGIRO_PORTFOLIO_CSV_SOURCE,
+            externalAccountId = DEGIRO_PORTFOLIO_EXTERNAL_ID,
+            lastSyncedAtEpochMs = now,
+            isArchived = existingAccount?.isArchived ?: false,
+            createdAtEpochMs = existingAccount?.createdAtEpochMs ?: now,
+            updatedAtEpochMs = now,
+        )
+        ledgerRepository.upsertAccount(account)
+
+        val positions = portfolio.positions.map { row ->
+            InvestmentPosition(
+                id = buildDegiroPositionId(accountId = accountId, productName = row.productName, isin = row.isin),
+                accountId = accountId,
+                providerAccountId = DEGIRO_PORTFOLIO_EXTERNAL_ID,
+                instrumentIsin = row.isin,
+                instrumentName = row.productName,
+                assetClass = "Broker portfolio holding",
+                titles = row.quantity,
+                price = row.price,
+                marketValueMinor = row.valueMinor,
+                costAmountMinor = null,
+                valuationDate = valuationDate,
+                updatedAtEpochMs = now,
+            )
+        }
+        ledgerRepository.replaceInvestmentPositions(accountId, positions)
+
+        ledgerRepository.upsertAccountValuationSnapshot(
+            AccountValuationSnapshot(
+                id = "snapshot-file-degiro-$accountId-$valuationDate",
+                accountId = accountId,
+                sourceProvider = DEGIRO_PORTFOLIO_CSV_SOURCE,
+                currencyCode = portfolio.currencyCode,
+                valueMinor = portfolio.totalValueMinor,
+                valuationDate = valuationDate,
+                capturedAtEpochMs = now,
+            ),
+        )
+
+        return PortfolioImportResult(
+            accountName = account.name,
+            importedPositions = positions.size,
+            totalValueMinor = portfolio.totalValueMinor,
+            cashBalanceMinor = portfolio.cashBalanceMinor,
+            currencyCode = portfolio.currencyCode,
+            sourceFileName = file.name,
+        )
+    }
 }
 
 private fun choosePdfFile(): File? {
@@ -149,6 +237,20 @@ private fun choosePdfFile(): File? {
         dialogTitle = "Import Caja Ingenieros PDF statement"
         fileFilter = FileNameExtensionFilter("PDF files", "pdf")
         selectedFile = File("movimientos.pdf")
+    }
+    val result = chooser.showOpenDialog(null)
+    return if (result == JFileChooser.APPROVE_OPTION) {
+        chooser.selectedFile
+    } else {
+        null
+    }
+}
+
+private fun chooseCsvFile(): File? {
+    val chooser = JFileChooser().apply {
+        dialogTitle = "Import DEGIRO portfolio CSV"
+        fileFilter = FileNameExtensionFilter("CSV files", "csv")
+        selectedFile = File("Portfolio.csv")
     }
     val result = chooser.showOpenDialog(null)
     return if (result == JFileChooser.APPROVE_OPTION) {
@@ -208,4 +310,21 @@ private fun formatBalanceNote(amountMinor: Long, currencyCode: String): String {
     val major = absoluteMinor / 100
     val minor = absoluteMinor % 100
     return "$major.${minor.toString().padStart(2, '0')} $currencyCode"
+}
+
+private fun todayIsoDate(): String =
+    Clock.System.now()
+        .toLocalDateTime(TimeZone.currentSystemDefault())
+        .date
+        .toString()
+
+private fun buildDegiroPositionId(
+    accountId: String,
+    productName: String,
+    isin: String?,
+): String {
+    val signature = listOf(accountId, isin.orEmpty(), productName.trim().lowercase())
+        .joinToString("|")
+    val hash = signature.hashCode().toUInt().toString(16)
+    return "position-file-degiro-$hash"
 }

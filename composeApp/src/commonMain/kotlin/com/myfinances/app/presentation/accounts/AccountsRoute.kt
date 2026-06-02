@@ -7,15 +7,18 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.myfinances.app.domain.model.AccountType
 import com.myfinances.app.domain.repository.LedgerRepository
 import com.myfinances.app.integrations.indexa.sync.IndexaIntegrationService
+import com.myfinances.app.integrations.statements.StatementImportService
 
 @Composable
 fun AccountsRoute(
     ledgerRepository: LedgerRepository,
     indexaIntegrationService: IndexaIntegrationService,
+    statementImportService: StatementImportService,
     accountsViewModel: AccountsViewModel = viewModel {
         AccountsViewModel(
             ledgerRepository = ledgerRepository,
             indexaIntegrationService = indexaIntegrationService,
+            statementImportService = statementImportService,
         )
     },
 ) {
@@ -38,6 +41,7 @@ fun AccountsRoute(
         onSnapshotValueChange = accountsViewModel::onSnapshotValueChange,
         onSnapshotDateChange = accountsViewModel::onSnapshotDateChange,
         onSaveSnapshot = accountsViewModel::saveSnapshot,
+        onImportDegiroPortfolioCsv = accountsViewModel::importDegiroPortfolioCsv,
         onCloseAccountDetails = accountsViewModel::closeAccountDetails,
         onEditAccount = accountsViewModel::editAccount,
         onRequestDeleteAccount = accountsViewModel::requestDeleteAccount,

@@ -42,28 +42,56 @@ internal fun AccountActionsCard(
     uiState: AccountsUiState,
     onShowCreateForm: () -> Unit,
     onHideAccountForm: () -> Unit,
+    onImportDegiroPortfolioCsv: () -> Unit,
 ) {
     Card {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(16.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            if (!uiState.isFormVisible) {
-                Button(
-                    onClick = onShowCreateForm,
-                    enabled = !uiState.isBusy,
-                ) {
-                    Text("Create account")
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (!uiState.isFormVisible) {
+                    Button(
+                        onClick = onShowCreateForm,
+                        enabled = !uiState.isBusy,
+                    ) {
+                        Text("Create account")
+                    }
+                } else {
+                    Button(
+                        onClick = onHideAccountForm,
+                        enabled = !uiState.isBusy,
+                    ) {
+                        Text(if (uiState.isEditing) "Cancel editing" else "Hide form")
+                    }
                 }
-            } else {
-                Button(
-                    onClick = onHideAccountForm,
-                    enabled = !uiState.isBusy,
-                ) {
-                    Text(if (uiState.isEditing) "Cancel editing" else "Hide form")
+
+                if (uiState.isPortfolioImportSupported) {
+                    Button(
+                        onClick = onImportDegiroPortfolioCsv,
+                        enabled = !uiState.isBusy && !uiState.isImportingPortfolio,
+                    ) {
+                        Text(if (uiState.isImportingPortfolio) "Importing..." else "Import DEGIRO CSV")
+                    }
                 }
+            }
+
+            uiState.portfolioImportMessage?.let { message ->
+                Text(
+                    text = message,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+
+            uiState.errorMessage?.let { error ->
+                Text(
+                    text = error,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error,
+                )
             }
         }
     }

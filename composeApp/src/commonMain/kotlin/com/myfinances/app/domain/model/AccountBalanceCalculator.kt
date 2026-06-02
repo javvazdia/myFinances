@@ -9,7 +9,10 @@ fun calculateAccountCurrentBalances(
     val latestSnapshotsByAccountId = snapshots
         .groupBy(AccountValuationSnapshot::accountId)
         .mapValues { (_, accountSnapshots) ->
-            accountSnapshots.maxByOrNull(AccountValuationSnapshot::capturedAtEpochMs)
+            accountSnapshots.maxWithOrNull(
+                compareBy<AccountValuationSnapshot> { snapshot -> snapshot.valuationDate.orEmpty() }
+                    .thenBy(AccountValuationSnapshot::capturedAtEpochMs),
+            )
         }
     return accounts.associate { account ->
         account.id to calculateAccountCurrentBalance(
@@ -25,12 +28,12 @@ fun calculateAccountCurrentBalance(
     transactions: List<FinanceTransaction>,
     latestSnapshot: AccountValuationSnapshot? = null,
 ): Long {
-    if (account.isSyncedInvestmentAccount()) {
-        return latestSnapshot?.valueMinor ?: account.openingBalanceMinor
+    if (account.type == AccountType.INVESTMENT && latestSnapshot != null) {
+        return latestSnapshot.valueMinor
     }
 
-    if (account.isManualInvestmentAccount() && latestSnapshot != null) {
-        return latestSnapshot.valueMinor
+    if (account.isSyncedInvestmentAccount()) {
+        return account.openingBalanceMinor
     }
 
     val netTransactions = transactions.sumOf { transaction ->
@@ -47,6 +50,3 @@ fun calculateAccountCurrentBalance(
 
 private fun Account.isSyncedInvestmentAccount(): Boolean =
     sourceType == AccountSourceType.API_SYNC && type == AccountType.INVESTMENT
-
-private fun Account.isManualInvestmentAccount(): Boolean =
-    sourceType == AccountSourceType.MANUAL && type == AccountType.INVESTMENT

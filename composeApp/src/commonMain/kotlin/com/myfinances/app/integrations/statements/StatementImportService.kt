@@ -6,6 +6,10 @@ interface StatementImportService {
     suspend fun importCajaIngenierosPdf(): StatementImportResult?
 
     suspend fun importCajaIngenierosPdfFromFile(filePath: String): StatementImportResult
+
+    suspend fun importDegiroPortfolioCsv(): PortfolioImportResult?
+
+    suspend fun importDegiroPortfolioCsvFromFile(filePath: String): PortfolioImportResult
 }
 
 data class StatementImportResult(
@@ -13,6 +17,15 @@ data class StatementImportResult(
     val importedTransactions: Int,
     val skippedTransactions: Int,
     val endingBalanceMinor: Long,
+    val currencyCode: String,
+    val sourceFileName: String,
+)
+
+data class PortfolioImportResult(
+    val accountName: String,
+    val importedPositions: Int,
+    val totalValueMinor: Long,
+    val cashBalanceMinor: Long,
     val currencyCode: String,
     val sourceFileName: String,
 )
@@ -25,4 +38,10 @@ object UnsupportedStatementImportService : StatementImportService {
 
     override suspend fun importCajaIngenierosPdfFromFile(filePath: String): StatementImportResult =
         error("PDF statement import is not available on this platform yet.")
+
+    override suspend fun importDegiroPortfolioCsv(): PortfolioImportResult? =
+        error("Portfolio CSV import is not available on this platform yet.")
+
+    override suspend fun importDegiroPortfolioCsvFromFile(filePath: String): PortfolioImportResult =
+        error("Portfolio CSV import is not available on this platform yet.")
 }

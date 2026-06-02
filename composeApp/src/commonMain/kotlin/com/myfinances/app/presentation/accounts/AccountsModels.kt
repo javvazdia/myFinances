@@ -21,6 +21,9 @@ data class AccountsUiState(
     val isSnapshotFormVisible: Boolean = false,
     val draftSnapshotValue: String = "",
     val draftSnapshotDate: String = "",
+    val isPortfolioImportSupported: Boolean = false,
+    val isImportingPortfolio: Boolean = false,
+    val portfolioImportMessage: String? = null,
     val draftName: String = "",
     val selectedType: AccountType = AccountType.CHECKING,
     val draftCurrencyCode: String = "EUR",
@@ -50,7 +53,7 @@ data class AccountsUiState(
         }?.name
 
     val isBusy: Boolean
-        get() = isSaving || pendingDeleteAccountId != null
+        get() = isSaving || pendingDeleteAccountId != null || isImportingPortfolio
 
     val canRecordManualSnapshot: Boolean
         get() = selectedAccount != null
@@ -140,6 +143,8 @@ internal fun AccountsUiState.toCreateMode(): AccountsUiState =
         isSnapshotFormVisible = false,
         draftSnapshotValue = "",
         draftSnapshotDate = "",
+        isImportingPortfolio = false,
+        portfolioImportMessage = null,
         draftName = "",
         selectedType = AccountType.CHECKING,
         draftOpeningBalance = "",

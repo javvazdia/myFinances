@@ -40,6 +40,7 @@ fun AccountsScreen(
     onSnapshotValueChange: (String) -> Unit,
     onSnapshotDateChange: (String) -> Unit,
     onSaveSnapshot: () -> Unit,
+    onImportDegiroPortfolioCsv: () -> Unit,
     onCloseAccountDetails: () -> Unit,
     onEditAccount: (String) -> Unit,
     onRequestDeleteAccount: (String) -> Unit,
@@ -115,6 +116,7 @@ fun AccountsScreen(
                     uiState = uiState,
                     onShowCreateForm = onShowCreateForm,
                     onHideAccountForm = onHideAccountForm,
+                    onImportDegiroPortfolioCsv = onImportDegiroPortfolioCsv,
                 )
             }
 

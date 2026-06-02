@@ -10,6 +10,8 @@ import com.myfinances.app.domain.model.calculateAccountCurrentBalances
 import com.myfinances.app.domain.repository.LedgerRepository
 import com.myfinances.app.integrations.indexa.sync.INDEXA_PROVIDER_NAME
 import com.myfinances.app.integrations.indexa.sync.IndexaIntegrationService
+import com.myfinances.app.integrations.statements.StatementImportService
+import com.myfinances.app.integrations.statements.UnsupportedStatementImportService
 import com.myfinances.app.logging.AppLogger
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,8 +29,13 @@ import kotlin.time.Clock
 class AccountsViewModel(
     private val ledgerRepository: LedgerRepository,
     private val indexaIntegrationService: IndexaIntegrationService? = null,
+    private val statementImportService: StatementImportService = UnsupportedStatementImportService,
 ) : ViewModel() {
-    private val _uiState = MutableStateFlow(AccountsUiState())
+    private val _uiState = MutableStateFlow(
+        AccountsUiState(
+            isPortfolioImportSupported = statementImportService.isSupported,
+        ),
+    )
     val uiState: StateFlow<AccountsUiState> = _uiState.asStateFlow()
     private var selectedPositionsJob: Job? = null
     private var selectedTransactionsJob: Job? = null
@@ -54,6 +61,7 @@ class AccountsViewModel(
                     currentState.copy(
                         accounts = accounts,
                         currentBalancesByAccountId = currentBalances,
+                        isPortfolioImportSupported = statementImportService.isSupported,
                         selectedAccountId = currentState.selectedAccountId
                             ?.takeIf { selectedId -> accounts.any { account -> account.id == selectedId } },
                         editingAccountId = currentState.editingAccountId
@@ -235,6 +243,45 @@ class AccountsViewModel(
                     draftSnapshotDate = "",
                     errorMessage = null,
                 )
+            }
+        }
+    }
+
+    fun importDegiroPortfolioCsv() {
+        if (!statementImportService.isSupported) {
+            _uiState.update { currentState ->
+                currentState.copy(
+                    errorMessage = "Portfolio CSV import is not available on this platform yet.",
+                )
+            }
+            return
+        }
+
+        viewModelScope.launch {
+            _uiState.update { currentState ->
+                currentState.copy(
+                    isImportingPortfolio = true,
+                    portfolioImportMessage = null,
+                    errorMessage = null,
+                )
+            }
+
+            runCatching {
+                statementImportService.importDegiroPortfolioCsv()
+            }.onSuccess { result ->
+                _uiState.update { currentState ->
+                    currentState.copy(
+                        isImportingPortfolio = false,
+                        portfolioImportMessage = result?.let(::buildPortfolioImportMessage),
+                    )
+                }
+            }.onFailure { throwable ->
+                _uiState.update { currentState ->
+                    currentState.copy(
+                        isImportingPortfolio = false,
+                        errorMessage = throwable.message ?: "DEGIRO portfolio import failed.",
+                    )
+                }
             }
         }
     }

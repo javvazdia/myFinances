@@ -3,6 +3,7 @@ package com.myfinances.app.domain.model.integration
 enum class ExternalProviderId {
     INDEXA,
     CAJA_INGENIEROS,
+    DEGIRO,
 }
 
 enum class ExternalProviderCapability {
@@ -202,6 +203,23 @@ object ExternalProviderCatalog {
                     required = false,
                 ),
             ),
+        ),
+        ExternalProviderDefinition(
+            id = ExternalProviderId.DEGIRO,
+            displayName = "DEGIRO",
+            summary = "Portfolio CSV import for investment holdings and account valuation snapshots.",
+            capabilities = setOf(
+                ExternalProviderCapability.HOLDINGS_SYNC,
+                ExternalProviderCapability.MANUAL_SYNC,
+            ),
+            stage = ExternalIntegrationStage.SCAFFOLDED,
+            setupInstructions = listOf(
+                "Export your DEGIRO portfolio report as CSV.",
+                "Use Import DEGIRO CSV in the Accounts tab to update holdings and record a valuation snapshot.",
+                "DEGIRO does not offer an official API, so this integration stays file-import based.",
+            ),
+            documentationLabel = "DEGIRO report export docs",
+            documentationUrl = "https://www.degiro.es/helpdesk/impuestos/tratados-fiscales/que-tipo-de-informes-puedo-descargarme-y-donde-puedo-encontrarlos",
         ),
     )
 }

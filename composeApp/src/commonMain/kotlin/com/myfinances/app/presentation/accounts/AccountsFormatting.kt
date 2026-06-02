@@ -3,6 +3,7 @@ package com.myfinances.app.presentation.accounts
 import com.myfinances.app.domain.model.AccountType
 import com.myfinances.app.domain.model.AccountValuationSnapshot
 import com.myfinances.app.domain.model.InvestmentPosition
+import com.myfinances.app.integrations.statements.PortfolioImportResult
 import com.myfinances.app.presentation.shared.formatMinorMoney
 import com.myfinances.app.presentation.shared.formatTimestampLabel
 import kotlinx.datetime.LocalDate
@@ -105,6 +106,9 @@ internal fun formatAccountAmountInput(amountMinor: Long): String {
     val prefix = if (amountMinor < 0) "-" else ""
     return "$prefix$major.${minor.toString().padStart(2, '0')}"
 }
+
+internal fun buildPortfolioImportMessage(result: PortfolioImportResult): String =
+    "Imported ${result.importedPositions} positions from ${result.sourceFileName} into ${result.accountName}. Total value ${formatMoney(result.totalValueMinor, result.currencyCode)}. Cash ${formatMoney(result.cashBalanceMinor, result.currencyCode)}."
 
 private fun formatHoldingDecimal(value: Double): String =
     value
