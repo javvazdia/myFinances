@@ -27,4 +27,17 @@ class DegiroPortfolioCsvParserTest {
         assertEquals(7.93, portfolio.positions.first().price)
         assertEquals(23_80L, portfolio.positions.first().valueMinor)
     }
+
+    @Test
+    fun parsesNegativeMinorAmountsWithCents() {
+        val portfolio = DegiroPortfolioCsvParser.parse(
+            """
+            Producto,Symbol/ISIN,Cantidad,Precio de,Valor local,,Valor en EUR
+            CASH & CASH FUND & FTX CASH (EUR),,,,EUR,"-1,23","-1,23"
+            """.trimIndent(),
+        )
+
+        assertEquals(-1_23L, portfolio.cashBalanceMinor)
+        assertEquals(-1_23L, portfolio.totalValueMinor)
+    }
 }

@@ -130,8 +130,10 @@ private fun parseDecimalMinor(rawValue: String): Long? {
         .ifBlank { return null }
         .replace(".", "")
         .replace(',', '.')
-    val parts = normalized.split('.')
+    val sign = if (normalized.startsWith("-")) -1L else 1L
+    val unsignedValue = normalized.removePrefix("-").removePrefix("+")
+    val parts = unsignedValue.split('.')
     val wholePart = parts.firstOrNull()?.toLongOrNull() ?: return null
     val decimalPart = parts.getOrNull(1)?.padEnd(2, '0')?.take(2) ?: "00"
-    return (wholePart * 100) + decimalPart.toLong()
+    return sign * ((wholePart * 100) + decimalPart.toLong())
 }
